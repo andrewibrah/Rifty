@@ -12,10 +12,6 @@
       "resizeMode": "contain",
       "backgroundColor": "#0A0A0B"
     },
-    "extra": {
-      "REACT_APP_SUPABASE_URL": "https://ajqcprzxaywgdtsveewq.supabase.co",
-      "REACT_APP_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFqcWNwcnp4YXl3Z2R0c3ZlZXdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk1MjAzMTMsImV4cCI6MjA3NTA5NjMxM30.GpZPVxF7VLoiqtycAby_miY0TD1Probb6vVAyUYAqyA"
-    },
     "ios": {
       "supportsTablet": true
     },
