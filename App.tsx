@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -10,16 +11,16 @@ import {
   Text,
   View,
   Vibration,
-} from 'react-native';
-import { initDB, type EntryType } from './src/db';
-import ChatHeader from './src/components/ChatHeader';
-import MessageBubble from './src/components/MessageBubble';
-import TypingIndicator from './src/components/TypingIndicator';
-import MessageInput from './src/components/MessageInput';
-import HistoryModal from './src/components/HistoryModal';
-import { useChatState } from './src/hooks/useChatState';
-import type { MessageGroup } from './src/types/chat';
-import { colors, spacing, radii } from './src/theme';
+} from "react-native";
+import { initDB, type EntryType } from "./src/db";
+import ChatHeader from "./src/components/ChatHeader";
+import MessageBubble from "./src/components/MessageBubble";
+import TypingIndicator from "./src/components/TypingIndicator";
+import MessageInput from "./src/components/MessageInput";
+import HistoryModal from "./src/components/HistoryModal";
+import { useChatState } from "./src/hooks/useChatState";
+import type { MessageGroup } from "./src/types/chat";
+import { colors, spacing, radii, typography, shadows } from "./src/theme";
 
 const SPLASH_DURATION = 2500;
 
@@ -30,11 +31,12 @@ const App = () => {
     isTyping,
     groupMessages,
     sendMessage,
-    retryMessage
+    retryMessage,
+    clearMessages,
   } = useChatState();
 
-  const [type, setType] = useState<EntryType>('journal');
-  const [content, setContent] = useState('');
+  const [type, setType] = useState<EntryType>("journal");
+  const [content, setContent] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const [isSplashVisible, setIsSplashVisible] = useState(true);
 
@@ -97,7 +99,7 @@ const App = () => {
   const handleSend = async () => {
     if (!content.trim()) return;
     await sendMessage(content, type);
-    setContent('');
+    setContent("");
 
     requestAnimationFrame(() => {
       listRef.current?.scrollToEnd({ animated: true });
@@ -110,7 +112,12 @@ const App = () => {
 
   const messageGroups = groupMessages(messages);
 
-  const renderItem = ({ item: group }: { item: MessageGroup; index: number }) => (
+  const renderItem = ({
+    item: group,
+  }: {
+    item: MessageGroup;
+    index: number;
+  }) => (
     <View style={styles.messageGroup}>
       {group.messages.map((message, msgIndex) => (
         <MessageBubble
@@ -126,32 +133,48 @@ const App = () => {
 
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.carbonBlack} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.flex}
         >
-          <View style={styles.backgroundGlow} />
-          <ChatHeader onHistoryPress={() => setShowHistory(true)} />
-
-          <FlatList
-            ref={listRef}
-            data={messageGroups}
-            renderItem={renderItem}
-            keyExtractor={item => item.id}
-            contentContainerStyle={styles.listContent}
-            style={styles.messageList}
-            initialNumToRender={10}
-            maxToRenderPerBatch={10}
-            windowSize={10}
-            removeClippedSubviews
-            onContentSizeChange={() => {
-              requestAnimationFrame(() => {
-                listRef.current?.scrollToEnd({ animated: false });
-              });
-            }}
+          <ChatHeader
+            onHistoryPress={() => setShowHistory(true)}
+            onClearPress={clearMessages}
+            hasContent={messages.length > 0}
           />
+
+          <View style={styles.messageContainer}>
+            {messages.length === 0 && (
+              <View style={styles.emptyStateContainer}>
+                <Image
+                  source={require("./assets/logo.png")}
+                  style={styles.emptyStateLogo}
+                  resizeMode="contain"
+                />
+              </View>
+            )}
+            <FlatList
+              ref={listRef}
+              data={messageGroups}
+              renderItem={renderItem}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.listContent}
+              style={styles.messageList}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={10}
+              removeClippedSubviews={false}
+              scrollEnabled={true}
+              nestedScrollEnabled={true}
+              onContentSizeChange={() => {
+                requestAnimationFrame(() => {
+                  listRef.current?.scrollToEnd({ animated: false });
+                });
+              }}
+            />
+          </View>
 
           <TypingIndicator isVisible={isTyping} />
 
@@ -171,20 +194,15 @@ const App = () => {
       />
 
       {isSplashVisible && (
-        <Animated.View style={[styles.splashContainer, { opacity: splashOpacity }]}>
+        <Animated.View
+          style={[styles.splashContainer, { opacity: splashOpacity }]}
+          pointerEvents="none"
+        >
           <View style={styles.splashContent}>
-            <View style={styles.splashGlow} />
-            <Text style={styles.splashR}>R</Text>
-            <Animated.View
-              style={[
-                styles.splashFlame,
-                {
-                  transform: [
-                    { translateY: flameTranslate },
-                    { scale: flameScale },
-                  ],
-                },
-              ]}
+            <Image
+              source={require("./assets/logo.png")}
+              style={styles.splashLogo}
+              resizeMode="contain"
             />
           </View>
         </Animated.View>
@@ -196,26 +214,45 @@ const App = () => {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.carbonBlack,
+    backgroundColor: colors.background,
   },
   safeArea: {
     flex: 1,
-    backgroundColor: colors.carbonBlack,
+    backgroundColor: colors.background,
   },
   flex: {
     flex: 1,
-    position: 'relative',
+    position: "relative",
   },
   backgroundGlow: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
     height: 220,
-    backgroundColor: colors.primaryRed,
-    opacity: 0.15,
+    backgroundColor: colors.accent,
+    opacity: 0.08,
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,
+  },
+  messageContainer: {
+    flex: 1,
+    position: "relative",
+  },
+  emptyStateContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    pointerEvents: "none",
+  },
+  emptyStateLogo: {
+    width: 150,
+    height: 150,
+    opacity: 0.05,
   },
   messageList: {
     flex: 1,
@@ -231,44 +268,29 @@ const styles = StyleSheet.create({
   },
   splashContainer: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.carbonBlack,
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: colors.background,
+    justifyContent: "center",
+    alignItems: "center",
   },
   splashContent: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   splashGlow: {
-    position: 'absolute',
+    position: "absolute",
     width: 200,
     height: 200,
     borderRadius: 100,
-    backgroundColor: colors.primaryRed,
-    opacity: 0.2,
-    shadowColor: colors.emberOrange,
+    backgroundColor: colors.accent,
+    opacity: 0.15,
+    shadowColor: colors.accent,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 1,
     shadowRadius: 60,
   },
-  splashR: {
-    fontSize: 144,
-    color: colors.primaryRed,
-    fontWeight: '800',
-    letterSpacing: 4,
-  },
-  splashFlame: {
-    position: 'absolute',
-    top: -60,
+  splashLogo: {
     width: 120,
     height: 120,
-    borderRadius: 60,
-    backgroundColor: colors.primaryRed,
-    shadowColor: colors.emberOrange,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 40,
-    opacity: 0.7,
   },
 });
 

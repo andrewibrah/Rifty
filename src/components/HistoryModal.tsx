@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -9,36 +10,38 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
-} from 'react-native';
-import type { Entry, EntryType, Annotation } from '../db';
+  View,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import type { Entry, EntryType, Annotation } from "../db";
 import {
   getEntryById,
   listEntriesByType,
   listAnnotationsForEntry,
   insertAnnotation,
   insertLearning,
-  insertEthicalRecord
-} from '../db';
-import { generateAIResponse, formatAnnotationLabel } from '../services/ai';
-import { colors, radii, spacing } from '../theme';
+  insertEthicalRecord,
+  deleteEntry,
+} from "../db";
+import { generateAIResponse, formatAnnotationLabel } from "../services/ai";
+import { colors, radii, spacing, typography, shadows } from "../theme";
 
 interface HistoryModalProps {
   visible: boolean;
   onClose: () => void;
 }
 
-type ViewMode = 'categories' | 'entries' | 'entryChat';
-type ComposerMode = 'note' | 'ai';
+type ViewMode = "categories" | "entries" | "entryChat";
+type ComposerMode = "note" | "ai";
 
 const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
-  goal: 'Goals',
-  journal: 'Journals',
-  schedule: 'Schedules'
+  goal: "Goals",
+  journal: "Journals",
+  schedule: "Schedules",
 };
 
 const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
-  const [mode, setMode] = useState<ViewMode>('categories');
+  const [mode, setMode] = useState<ViewMode>("categories");
   const [selectedType, setSelectedType] = useState<EntryType | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [entriesLoading, setEntriesLoading] = useState(false);
@@ -50,14 +53,17 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
   const [annotationsLoading, setAnnotationsLoading] = useState(false);
   const [annotationsError, setAnnotationsError] = useState<string | null>(null);
 
-  const [composerMode, setComposerMode] = useState<ComposerMode>('note');
-  const [composerText, setComposerText] = useState('');
+  const [composerMode, setComposerMode] = useState<ComposerMode>("note");
+  const [composerText, setComposerText] = useState("");
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [isWorkingWithAI, setIsWorkingWithAI] = useState(false);
+  const [annotationCounts, setAnnotationCounts] = useState<
+    Record<number, number>
+  >({});
 
   useEffect(() => {
     if (!visible) {
-      setMode('categories');
+      setMode("categories");
       setSelectedType(null);
       setEntries([]);
       setEntriesError(null);
@@ -65,8 +71,8 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
       setSelectedEntry(null);
       setAnnotations([]);
       setAnnotationsError(null);
-      setComposerMode('note');
-      setComposerText('');
+      setComposerMode("note");
+      setComposerText("");
       setIsSavingNote(false);
       setIsWorkingWithAI(false);
     }
@@ -88,11 +94,21 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
         const items = await listEntriesByType(selectedType);
         if (!isCancelled) {
           setEntries(items);
+
+          // Load annotation counts for each entry
+          const counts: Record<number, number> = {};
+          for (const item of items) {
+            if (item.id != null) {
+              const annotations = await listAnnotationsForEntry(item.id);
+              counts[item.id] = annotations.length;
+            }
+          }
+          setAnnotationCounts(counts);
         }
       } catch (error) {
-        console.error('Error loading entries', error);
+        console.error("Error loading entries", error);
         if (!isCancelled) {
-          setEntriesError('Unable to load entries right now.');
+          setEntriesError("Unable to load entries right now.");
         }
       } finally {
         if (!isCancelled) {
@@ -123,7 +139,7 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
       try {
         const [entry, entryAnnotations] = await Promise.all([
           getEntryById(selectedEntryId),
-          listAnnotationsForEntry(selectedEntryId)
+          listAnnotationsForEntry(selectedEntryId),
         ]);
 
         if (!isCancelled) {
@@ -131,9 +147,9 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
           setAnnotations(entryAnnotations);
         }
       } catch (error) {
-        console.error('Error loading entry detail', error);
+        console.error("Error loading entry detail", error);
         if (!isCancelled) {
-          setAnnotationsError('Unable to load entry conversation.');
+          setAnnotationsError("Unable to load entry conversation.");
         }
       } finally {
         if (!isCancelled) {
@@ -151,14 +167,14 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
 
   const handleSelectType = useCallback((type: EntryType) => {
     setSelectedType(type);
-    setMode('entries');
+    setMode("entries");
   }, []);
 
   const handleSelectEntry = useCallback((entryId: number) => {
     setSelectedEntryId(entryId);
-    setMode('entryChat');
-    setComposerMode('note');
-    setComposerText('');
+    setMode("entryChat");
+    setComposerMode("note");
+    setComposerText("");
   }, []);
 
   const handleAddNote = useCallback(async () => {
@@ -170,16 +186,22 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
     try {
       const saved = await insertAnnotation({
         entry_id: selectedEntry.id,
-        kind: 'user',
-        channel: 'note',
+        kind: "user",
+        channel: "note",
         content: trimmed,
       });
       setAnnotationsError(null);
-      setAnnotations(prev => [...prev, saved]);
-      setComposerText('');
+      setAnnotations((prev) => [...prev, saved]);
+      setComposerText("");
+
+      // Update annotation count for this entry
+      setAnnotationCounts((prev) => ({
+        ...prev,
+        [selectedEntry.id!]: (prev[selectedEntry.id!] || 0) + 1,
+      }));
     } catch (error) {
-      console.error('Error saving note', error);
-      setAnnotationsError('Unable to save note right now.');
+      console.error("Error saving note", error);
+      setAnnotationsError("Unable to save note right now.");
     } finally {
       setIsSavingNote(false);
     }
@@ -197,12 +219,12 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
     try {
       const userAnnotation = await insertAnnotation({
         entry_id: entryId,
-        kind: 'user',
-        channel: 'ai',
+        kind: "user",
+        channel: "ai",
         content: trimmed,
       });
 
-      setAnnotations(prev => [...prev, userAnnotation]);
+      setAnnotations((prev) => [...prev, userAnnotation]);
 
       const aiResult = await generateAIResponse({
         entryContent: selectedEntry.content,
@@ -213,56 +235,135 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
 
       const botAnnotation = await insertAnnotation({
         entry_id: entryId,
-        kind: 'bot',
-        channel: 'ai',
+        kind: "bot",
+        channel: "ai",
         content: aiResult.reply,
       });
 
-      setAnnotations(prev => [...prev, botAnnotation]);
+      setAnnotations((prev) => [...prev, botAnnotation]);
 
       await insertLearning({ entry_id: entryId, insight: aiResult.learned });
-      await insertEthicalRecord({ entry_id: entryId, details: aiResult.ethical });
+      await insertEthicalRecord({
+        entry_id: entryId,
+        details: aiResult.ethical,
+      });
 
-      setComposerText('');
+      setComposerText("");
+
+      // Update annotation count (user + bot = +2)
+      setAnnotationCounts((prev) => ({
+        ...prev,
+        [entryId]: (prev[entryId] || 0) + 2,
+      }));
     } catch (error) {
-      console.error('Error requesting AI guidance', error);
-      setAnnotationsError(error instanceof Error ? error.message : 'Unable to contact AI right now.');
+      console.error("Error requesting AI guidance", error);
+      setAnnotationsError(
+        error instanceof Error
+          ? error.message
+          : "Unable to contact AI right now."
+      );
     } finally {
       setIsWorkingWithAI(false);
     }
   }, [annotations, composerText, selectedEntry]);
 
-  const categoryButtons = useMemo(() => (
-    (['goal', 'journal', 'schedule'] as EntryType[]).map(type => (
-      <TouchableOpacity
-        key={type}
-        style={styles.categoryButton}
-        onPress={() => handleSelectType(type)}
-      >
-        <Text style={styles.categoryButtonText}>{ENTRY_TYPE_LABELS[type]}</Text>
-      </TouchableOpacity>
-    ))
-  ), [handleSelectType]);
+  const getIconForType = (type: EntryType) => {
+    switch (type) {
+      case "journal":
+        return "book-outline";
+      case "goal":
+        return "flag-outline";
+      case "schedule":
+        return "calendar-outline";
+    }
+  };
 
-  const renderEntryItem = useCallback(({ item }: { item: Entry }) => (
-    <TouchableOpacity
-      style={styles.historyItem}
-      onPress={() => item.id != null && handleSelectEntry(item.id)}
-    >
-      <View style={styles.historyItemHeader}>
-        <Text style={styles.historyItemType}>{ENTRY_TYPE_LABELS[item.type]}</Text>
-        {item.created_at && (
-          <Text style={styles.historyItemDate}>
-            {new Date(item.created_at).toLocaleDateString()}
+  const categoryButtons = useMemo(
+    () =>
+      (["goal", "journal", "schedule"] as EntryType[]).map((type) => (
+        <TouchableOpacity
+          key={type}
+          style={styles.categoryButton}
+          onPress={() => handleSelectType(type)}
+        >
+          <View style={styles.categoryIconContainer}>
+            <Ionicons
+              name={getIconForType(type)}
+              size={28}
+              color={colors.accent}
+            />
+          </View>
+          <Text style={styles.categoryButtonText}>
+            {ENTRY_TYPE_LABELS[type]}
           </Text>
-        )}
-      </View>
-      <Text style={styles.historyItemContent}>{item.content}</Text>
-    </TouchableOpacity>
-  ), [handleSelectEntry]);
+        </TouchableOpacity>
+      )),
+    [handleSelectType]
+  );
+
+  const handleDeleteEntry = useCallback(
+    async (id: number) => {
+      Alert.alert(
+        "Delete Entry",
+        "Are you sure you want to delete this entry? This cannot be undone.",
+        [
+          {
+            text: "Cancel",
+            style: "cancel",
+          },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                await deleteEntry(id);
+                // Refresh the list
+                const updatedEntries = await listEntriesByType(selectedType!);
+                setEntries(updatedEntries);
+              } catch (error) {
+                console.error("Error deleting entry:", error);
+              }
+            },
+          },
+        ]
+      );
+    },
+    [selectedType]
+  );
+
+  const renderEntryItem = useCallback(
+    ({ item }: { item: Entry }) => {
+      const updateCount = item.id != null ? annotationCounts[item.id] || 0 : 0;
+
+      return (
+        <TouchableOpacity
+          style={styles.historyItem}
+          onPress={() => item.id != null && handleSelectEntry(item.id)}
+          onLongPress={() => item.id != null && handleDeleteEntry(item.id)}
+        >
+          <View style={styles.historyItemContent}>
+            <Text style={styles.historyItemText}>{item.content}</Text>
+            <View style={styles.historyItemFooter}>
+              {item.created_at && (
+                <Text style={styles.historyItemDate}>
+                  {new Date(item.created_at).toLocaleDateString()}
+                </Text>
+              )}
+              {updateCount > 0 && (
+                <Text style={styles.historyItemUpdates}>
+                  {updateCount} {updateCount === 1 ? "note" : "notes"}
+                </Text>
+              )}
+            </View>
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [handleSelectEntry, handleDeleteEntry, annotationCounts]
+  );
 
   const renderAnnotationItem = useCallback(({ item }: { item: Annotation }) => {
-    const isUser = item.kind === 'user';
+    const isUser = item.kind === "user";
     const label = formatAnnotationLabel(item.channel);
     return (
       <View
@@ -297,10 +398,15 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
             <Text
               style={[
                 styles.annotationTimestamp,
-                isUser ? styles.annotationTimestampUser : styles.annotationTimestampOther,
+                isUser
+                  ? styles.annotationTimestampUser
+                  : styles.annotationTimestampOther,
               ]}
             >
-              {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {new Date(item.created_at).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </Text>
           )}
         </View>
@@ -308,24 +414,24 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
     );
   }, []);
 
-  const showCategories = mode === 'categories';
-  const showEntries = mode === 'entries';
-  const showEntryChat = mode === 'entryChat';
+  const showCategories = mode === "categories";
+  const showEntries = mode === "entries";
+  const showEntryChat = mode === "entryChat";
 
   const handleBack = useCallback(() => {
     if (showEntryChat) {
-      setMode('entries');
+      setMode("entries");
       setSelectedEntryId(null);
       setSelectedEntry(null);
       setAnnotations([]);
       setAnnotationsError(null);
-      setComposerMode('note');
-      setComposerText('');
+      setComposerMode("note");
+      setComposerText("");
       return;
     }
 
     if (showEntries) {
-      setMode('categories');
+      setMode("categories");
       setSelectedType(null);
       setEntries([]);
       setEntriesError(null);
@@ -345,24 +451,33 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
       <View style={styles.overlay}>
         <SafeAreaView style={styles.modalCard}>
           <View style={styles.modalHeader}>
-            {(!showCategories) && (
-              <Pressable onPress={handleBack}>
-                <Text style={styles.headerAction}>Back</Text>
-              </Pressable>
+            {!showCategories ? (
+              <TouchableOpacity
+                onPress={handleBack}
+                style={styles.headerButton}
+              >
+                <Text style={styles.headerAction}>← Back</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.headerButtonPlaceholder} />
             )}
             <Text style={styles.modalTitle}>
-              {showCategories && 'History'}
-              {showEntries && selectedType ? `${ENTRY_TYPE_LABELS[selectedType]} History` : null}
-              {showEntryChat && selectedEntry ? 'Conversation' : null}
+              {showCategories && "History"}
+              {showEntries && selectedType
+                ? `${ENTRY_TYPE_LABELS[selectedType]} History`
+                : null}
+              {showEntryChat && selectedEntry ? "Conversation" : null}
             </Text>
-            <Pressable onPress={onClose}>
+            <TouchableOpacity onPress={onClose} style={styles.headerButton}>
               <Text style={styles.headerAction}>Close</Text>
-            </Pressable>
+            </TouchableOpacity>
           </View>
 
           {showCategories && (
             <View style={styles.categoryList}>
-              <Text style={styles.sectionHint}>What would you like to review?</Text>
+              <Text style={styles.sectionHint}>
+                What would you like to review?
+              </Text>
               {categoryButtons}
             </View>
           )}
@@ -370,7 +485,10 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
           {showEntries && (
             <View style={styles.listContainer}>
               {entriesLoading && (
-                <ActivityIndicator style={styles.loadingIndicator} color={colors.ashWhite} />
+                <ActivityIndicator
+                  style={styles.loadingIndicator}
+                  color={colors.textPrimary}
+                />
               )}
               {entriesError && (
                 <Text style={styles.errorText}>{entriesError}</Text>
@@ -381,8 +499,10 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
               <FlatList
                 style={styles.entriesList}
                 data={entries}
-                keyExtractor={item =>
-                  item.id != null ? item.id.toString() : `${item.type}-${item.created_at ?? ''}`
+                keyExtractor={(item) =>
+                  item.id != null
+                    ? item.id.toString()
+                    : `${item.type}-${item.created_at ?? ""}`
                 }
                 renderItem={renderEntryItem}
               />
@@ -393,30 +513,40 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
             <View style={styles.entryChatContainer}>
               {selectedEntry && (
                 <View style={styles.entrySummary}>
-                  <Text style={styles.entrySummaryType}>{ENTRY_TYPE_LABELS[selectedEntry.type]}</Text>
-                  <Text style={styles.entrySummaryContent}>{selectedEntry.content}</Text>
+                  <Text style={styles.entrySummaryContent}>
+                    {selectedEntry.content}
+                  </Text>
                   {selectedEntry.created_at && (
                     <Text style={styles.entrySummaryDate}>
-                      Logged {new Date(selectedEntry.created_at).toLocaleString()}
+                      {new Date(selectedEntry.created_at).toLocaleString()}
                     </Text>
                   )}
                 </View>
               )}
 
               {annotationsLoading && (
-                <ActivityIndicator style={styles.loadingIndicator} color={colors.ashWhite} />
+                <ActivityIndicator
+                  style={styles.loadingIndicator}
+                  color={colors.textPrimary}
+                />
               )}
               {annotationsError && (
                 <Text style={styles.errorText}>{annotationsError}</Text>
               )}
-              {!annotationsLoading && annotations.length === 0 && !annotationsError && (
-                <Text style={styles.emptyState}>No updates yet. Add your first note below.</Text>
-              )}
+              {!annotationsLoading &&
+                annotations.length === 0 &&
+                !annotationsError && (
+                  <Text style={styles.emptyState}>
+                    No updates yet. Add your first note below.
+                  </Text>
+                )}
               <FlatList
                 style={styles.annotationListContainer}
                 data={annotations}
-                keyExtractor={item =>
-                  item.id != null ? item.id.toString() : `${item.entry_id}-${item.created_at ?? ''}`
+                keyExtractor={(item) =>
+                  item.id != null
+                    ? item.id.toString()
+                    : `${item.entry_id}-${item.created_at ?? ""}`
                 }
                 renderItem={renderAnnotationItem}
                 contentContainerStyle={styles.annotationList}
@@ -425,41 +555,79 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
               <View style={styles.noteInputRow}>
                 <View style={styles.modeSwitcher}>
                   <TouchableOpacity
-                    onPress={() => setComposerMode('note')}
-                    style={[styles.modeButton, composerMode === 'note' && styles.modeButtonActive]}
+                    onPress={() => setComposerMode("note")}
+                    style={[
+                      styles.modeButton,
+                      composerMode === "note" && styles.modeButtonActive,
+                    ]}
                   >
-                    <Text style={[styles.modeButtonText, composerMode === 'note' && styles.modeButtonTextActive]}>Note</Text>
+                    <Text
+                      style={[
+                        styles.modeButtonText,
+                        composerMode === "note" && styles.modeButtonTextActive,
+                      ]}
+                    >
+                      Note
+                    </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    onPress={() => setComposerMode('ai')}
-                    style={[styles.modeButton, composerMode === 'ai' && styles.modeButtonActive]}
+                    onPress={() => setComposerMode("ai")}
+                    style={[
+                      styles.modeButton,
+                      composerMode === "ai" && styles.modeButtonActive,
+                    ]}
                   >
-                    <Text style={[styles.modeButtonText, composerMode === 'ai' && styles.modeButtonTextActive]}>AI</Text>
+                    <Text
+                      style={[
+                        styles.modeButtonText,
+                        composerMode === "ai" && styles.modeButtonTextActive,
+                      ]}
+                    >
+                      AI
+                    </Text>
                   </TouchableOpacity>
                 </View>
                 <TextInput
                   style={styles.noteInput}
                   value={composerText}
                   onChangeText={setComposerText}
-                  placeholder={composerMode === 'ai' ? 'Ask Reflectify for insight...' : 'Add an update...'}
+                  placeholder={
+                    composerMode === "ai"
+                      ? "Ask Riflett for insight..."
+                      : "Add an update..."
+                  }
                   placeholderTextColor="rgba(244,244,244,0.6)"
                   multiline
                 />
                 <TouchableOpacity
                   style={[
                     styles.noteSendButton,
-                    ((composerMode === 'note' && disableNoteSend) || (composerMode === 'ai' && disableAISend)) && styles.noteSendButtonDisabled,
+                    ((composerMode === "note" && disableNoteSend) ||
+                      (composerMode === "ai" && disableAISend)) &&
+                      styles.noteSendButtonDisabled,
                   ]}
-                  onPress={composerMode === 'note' ? handleAddNote : handleAskAI}
-                  disabled={composerMode === 'note' ? disableNoteSend : disableAISend}
+                  onPress={
+                    composerMode === "note" ? handleAddNote : handleAskAI
+                  }
+                  disabled={
+                    composerMode === "note" ? disableNoteSend : disableAISend
+                  }
                 >
                   <Text
                     style={[
                       styles.noteSendButtonText,
-                      ((composerMode === 'note' && disableNoteSend) || (composerMode === 'ai' && disableAISend)) && styles.noteSendButtonTextDisabled,
+                      ((composerMode === "note" && disableNoteSend) ||
+                        (composerMode === "ai" && disableAISend)) &&
+                        styles.noteSendButtonTextDisabled,
                     ]}
                   >
-                    {composerMode === 'ai' ? (isWorkingWithAI ? 'Contacting...' : 'Ask AI') : isSavingNote ? 'Saving' : 'Send'}
+                    {composerMode === "ai"
+                      ? isWorkingWithAI
+                        ? "Contacting..."
+                        : "Ask AI"
+                      : isSavingNote
+                        ? "Saving"
+                        : "Send"}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -474,75 +642,100 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(5,6,8,0.85)',
-    justifyContent: 'center',
+    backgroundColor: "rgba(10,10,11,0.95)",
+    justifyContent: "center",
     paddingHorizontal: spacing.md,
   },
   modalCard: {
     flex: 1,
-    backgroundColor: colors.primaryRed,
-    borderRadius: radii.lg,
-    paddingBottom: spacing.lg,
-    overflow: 'hidden',
+    backgroundColor: colors.background,
   },
   modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     paddingBottom: spacing.md,
-    backgroundColor: colors.primaryRed,
+    backgroundColor: colors.background,
   },
   modalTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: colors.carbonBlack,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+    fontFamily: typography.heading.fontFamily,
+    fontWeight: typography.heading.fontWeight,
+    letterSpacing: typography.heading.letterSpacing,
+    fontSize: 20,
+    color: colors.textPrimary,
+    flex: 1,
+    textAlign: "center",
+  },
+  headerButton: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.surface,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    minWidth: 70,
+    alignItems: "center",
+    ...shadows.glass,
+  },
+  headerButtonPlaceholder: {
+    width: 70,
   },
   headerAction: {
-    color: colors.ashWhite,
+    fontFamily: typography.button.fontFamily,
+    fontWeight: typography.button.fontWeight,
+    letterSpacing: typography.button.letterSpacing,
+    color: colors.accent,
     fontSize: 14,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
   },
   categoryList: {
     flex: 1,
-    backgroundColor: colors.carbonBlack,
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
+    backgroundColor: colors.background,
     padding: spacing.lg,
   },
   sectionHint: {
+    fontFamily: typography.body.fontFamily,
+    fontWeight: typography.body.fontWeight,
+    letterSpacing: typography.body.letterSpacing,
     fontSize: 16,
-    color: 'rgba(244,244,244,0.8)',
+    color: colors.textSecondary,
     marginBottom: spacing.lg,
   },
   categoryButton: {
-    backgroundColor: colors.primaryRed,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: spacing.lg,
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: colors.emberOrange,
-    shadowColor: colors.emberOrange,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
+    borderColor: colors.border,
+    ...shadows.glass,
+  },
+  categoryIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceElevated,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.accent,
   },
   categoryButtonText: {
+    flex: 1,
+    fontFamily: typography.title.fontFamily,
+    fontWeight: typography.title.fontWeight,
     fontSize: 18,
-    fontWeight: '700',
-    color: colors.carbonBlack,
-    letterSpacing: 1,
+    color: colors.textPrimary,
+    letterSpacing: 0.5,
   },
   listContainer: {
     flex: 1,
-    backgroundColor: colors.carbonBlack,
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
+    backgroundColor: colors.background,
   },
   entriesList: {
     flex: 1,
@@ -553,68 +746,86 @@ const styles = StyleSheet.create({
   errorText: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
-    color: colors.ashWhite,
+    color: colors.textPrimary,
   },
   emptyState: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
-    color: 'rgba(244,244,244,0.7)',
+    fontFamily: typography.body.fontFamily,
+    fontWeight: typography.body.fontWeight,
+    letterSpacing: typography.body.letterSpacing,
     fontSize: 16,
+    color: colors.textSecondary,
   },
   historyItem: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(244,244,244,0.1)',
-  },
-  historyItemHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.xs,
-  },
-  historyItemType: {
-    fontSize: 12,
-    color: colors.emberOrange,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
+    borderBottomColor: colors.border,
   },
   historyItemContent: {
+    flex: 1,
+  },
+  historyItemText: {
+    fontFamily: typography.body.fontFamily,
+    fontWeight: typography.body.fontWeight,
+    letterSpacing: typography.body.letterSpacing,
     fontSize: 16,
-    color: colors.ashWhite,
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
+  },
+  historyItemFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   historyItemDate: {
+    fontFamily: typography.caption.fontFamily,
+    fontWeight: typography.caption.fontWeight,
+    letterSpacing: typography.caption.letterSpacing,
     fontSize: 12,
-    color: 'rgba(244,244,244,0.6)',
+    color: colors.textSecondary,
+  },
+  historyItemUpdates: {
+    fontFamily: typography.caption.fontFamily,
+    fontWeight: typography.caption.fontWeight,
+    letterSpacing: typography.caption.letterSpacing,
+    fontSize: 11,
+    color: colors.accent,
+    backgroundColor: colors.surfaceElevated,
+    paddingHorizontal: spacing.sm - 2,
+    paddingVertical: 2,
+    borderRadius: radii.xs,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    overflow: "hidden",
   },
   entryChatContainer: {
     flex: 1,
-    backgroundColor: colors.carbonBlack,
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
+    backgroundColor: colors.background,
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.lg,
   },
   entrySummary: {
     paddingVertical: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(244,244,244,0.15)',
+    borderBottomColor: colors.border,
     marginBottom: spacing.md,
   },
-  entrySummaryType: {
-    fontSize: 12,
-    color: colors.emberOrange,
-    letterSpacing: 1,
-    marginBottom: spacing.xs,
-  },
   entrySummaryContent: {
+    fontFamily: typography.body.fontFamily,
+    fontWeight: typography.body.fontWeight,
+    letterSpacing: typography.body.letterSpacing,
     fontSize: 18,
-    color: colors.ashWhite,
+    color: colors.textPrimary,
     marginBottom: spacing.xs,
   },
   entrySummaryDate: {
+    fontFamily: typography.caption.fontFamily,
+    fontWeight: typography.caption.fontWeight,
+    letterSpacing: typography.caption.letterSpacing,
     fontSize: 12,
-    color: 'rgba(244,244,244,0.6)',
+    color: colors.textSecondary,
   },
   annotationList: {
     paddingBottom: spacing.md,
@@ -623,124 +834,148 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   annotationBubbleRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     marginBottom: spacing.md,
   },
   annotationRowUser: {
-    justifyContent: 'flex-end',
+    justifyContent: "flex-end",
   },
   annotationRowOther: {
-    justifyContent: 'flex-start',
+    justifyContent: "flex-start",
   },
   annotationBubble: {
-    maxWidth: '80%',
+    maxWidth: "80%",
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
     borderRadius: radii.md,
   },
   annotationBubbleUser: {
-    backgroundColor: colors.primaryRed,
-    borderBottomRightRadius: radii.xs,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    ...shadows.glass,
   },
   annotationBubbleOther: {
-    backgroundColor: colors.smokeGrey,
-    borderBottomLeftRadius: radii.xs,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.glass,
   },
   annotationLabel: {
+    fontFamily: typography.caption.fontFamily,
+    fontWeight: typography.caption.fontWeight,
+    letterSpacing: typography.caption.letterSpacing,
     fontSize: 11,
-    fontWeight: '700',
     marginBottom: spacing.xs,
-    letterSpacing: 0.8,
   },
   annotationLabelUser: {
-    color: colors.carbonBlack,
+    color: colors.textPrimary,
   },
   annotationLabelOther: {
-    color: colors.ashWhite,
+    color: colors.textSecondary,
   },
   annotationText: {
+    fontFamily: typography.body.fontFamily,
+    fontWeight: typography.body.fontWeight,
+    letterSpacing: typography.body.letterSpacing,
     fontSize: 15,
   },
   annotationTextUser: {
-    color: colors.carbonBlack,
+    color: colors.textPrimary,
   },
   annotationTextOther: {
-    color: colors.ashWhite,
+    color: colors.textPrimary,
   },
   annotationTimestamp: {
     marginTop: spacing.xs,
+    fontFamily: typography.caption.fontFamily,
+    fontWeight: typography.caption.fontWeight,
+    letterSpacing: typography.caption.letterSpacing,
     fontSize: 11,
-    textAlign: 'right',
+    textAlign: "right",
   },
   annotationTimestampUser: {
-    color: colors.carbonBlack,
+    color: colors.textSecondary,
   },
   annotationTimestampOther: {
-    color: 'rgba(244,244,244,0.6)',
+    color: colors.textSecondary,
   },
   noteInputRow: {
     borderTopWidth: 1,
-    borderTopColor: 'rgba(244,244,244,0.12)',
+    borderTopColor: colors.border,
     paddingTop: spacing.md,
   },
   modeSwitcher: {
-    flexDirection: 'row',
+    flexDirection: "row",
     marginBottom: spacing.sm,
   },
   modeButton: {
-    paddingVertical: spacing.xs,
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: 'rgba(244,244,244,0.2)',
+    borderColor: colors.border,
     marginRight: spacing.sm,
+    backgroundColor: colors.surface,
+    ...shadows.glass,
   },
   modeButtonActive: {
-    borderColor: colors.emberOrange,
-    backgroundColor: 'rgba(229,9,20,0.2)',
+    borderColor: colors.accent,
+    backgroundColor: colors.surfaceElevated,
+    ...shadows.glow,
   },
   modeButtonText: {
-    color: 'rgba(244,244,244,0.7)',
+    fontFamily: typography.button.fontFamily,
+    fontWeight: typography.button.fontWeight,
+    letterSpacing: typography.button.letterSpacing,
     fontSize: 12,
-    letterSpacing: 1,
+    color: colors.textSecondary,
   },
   modeButtonTextActive: {
-    color: colors.ashWhite,
+    color: colors.textPrimary,
+    fontWeight: "700" as const,
   },
   noteInput: {
-    minHeight: 40,
+    minHeight: 44,
     maxHeight: 120,
     borderRadius: radii.md,
-    backgroundColor: colors.carbonBlack,
+    backgroundColor: colors.surface,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    fontSize: 16,
-    color: colors.ashWhite,
+    paddingVertical: spacing.md,
+    fontFamily: typography.body.fontFamily,
+    fontWeight: typography.body.fontWeight,
+    letterSpacing: typography.body.letterSpacing,
+    fontSize: 15,
+    color: colors.textPrimary,
     borderWidth: 1,
-    borderColor: 'rgba(244,244,244,0.25)',
+    borderColor: colors.border,
     marginBottom: spacing.sm,
   },
   noteSendButton: {
-    backgroundColor: colors.carbonBlack,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm,
+    backgroundColor: colors.accent,
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.lg,
     borderWidth: 1,
-    borderColor: colors.emberOrange,
-    alignSelf: 'flex-end',
+    borderColor: colors.accent,
+    alignSelf: "flex-end",
+    minHeight: 44,
+    justifyContent: "center",
+    ...shadows.glass,
   },
   noteSendButtonDisabled: {
-    borderColor: 'rgba(244,244,244,0.2)',
-    backgroundColor: colors.smokeGrey,
+    borderColor: colors.borderLight,
+    backgroundColor: colors.surface,
   },
   noteSendButtonText: {
-    color: colors.ashWhite,
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 1,
+    fontFamily: typography.button.fontFamily,
+    letterSpacing: typography.button.letterSpacing,
+    fontSize: 15,
+    fontWeight: "700" as const,
+    color: colors.textPrimary,
   },
   noteSendButtonTextDisabled: {
-    color: 'rgba(244,244,244,0.6)',
+    color: colors.textTertiary,
   },
 });
 

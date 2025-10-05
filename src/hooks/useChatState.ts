@@ -1,21 +1,30 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import type { ChatMessage, MessageGroup, EntryMessage, BotMessage } from '../types/chat';
-import { insertEntry, listEntries } from '../db';
-import type { EntryType } from '../db';
+import { useState, useCallback, useRef, useEffect } from "react";
+import type {
+  ChatMessage,
+  MessageGroup,
+  EntryMessage,
+  BotMessage,
+} from "../types/chat";
+import { insertEntry, listEntries, deleteAllEntries, initDB } from "../db";
+import type { EntryType } from "../db";
 
 const successMessages: Record<EntryType, string> = {
-  goal: 'Saved. Keep up your hard work.',
-  journal: 'Saved. The more you log the more data you have of yourself',
-  schedule: 'saved. Your time is your power, use it widely'
+  goal: "Saved. Keep up your hard work.",
+  journal: "Saved. The more you log, the more data you have of yourself.",
+  schedule: "Saved. Your time is your power, use it wisely.",
 };
 
 export const useChatState = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined
+  );
 
   const loadMessages = useCallback(async () => {
     try {
+      // Ensure database is initialized
+      await initDB();
       const entries = await listEntries();
       const chatMessages: ChatMessage[] = [];
 
@@ -23,21 +32,21 @@ export const useChatState = () => {
         if (entry.id != null) {
           const entryMessage: EntryMessage = {
             id: entry.id.toString(),
-            kind: 'entry',
+            kind: "entry",
             type: entry.type,
             content: entry.content,
             created_at: entry.created_at || new Date().toISOString(),
-            status: 'sent'
+            status: "sent",
           };
           chatMessages.push(entryMessage);
 
           const botMessage: BotMessage = {
             id: `bot-${entry.id}`,
-            kind: 'bot',
+            kind: "bot",
             afterId: entry.id.toString(),
             content: successMessages[entry.type],
             created_at: entry.created_at || new Date().toISOString(),
-            status: 'sent'
+            status: "sent",
           };
           chatMessages.push(botMessage);
         }
@@ -45,7 +54,7 @@ export const useChatState = () => {
 
       setMessages(chatMessages);
     } catch (error) {
-      console.error('Error loading messages:', error);
+      console.error("Error loading messages:", error);
     }
   }, []);
 
@@ -57,8 +66,9 @@ export const useChatState = () => {
     if (msgs.length === 0) return [];
 
     // Sort messages by timestamp
-    const sortedMsgs = [...msgs].sort((a, b) =>
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    const sortedMsgs = [...msgs].sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     );
 
     const groups: MessageGroup[] = [];
@@ -67,15 +77,18 @@ export const useChatState = () => {
     sortedMsgs.forEach((message) => {
       const messageTime = new Date(message.created_at).getTime();
 
-      if (currentGroup &&
-          messageTime - new Date(currentGroup.timestamp).getTime() < 300000) { // 5 minutes
+      if (
+        currentGroup &&
+        messageTime - new Date(currentGroup.timestamp).getTime() < 300000
+      ) {
+        // 5 minutes
         currentGroup.messages.push(message);
       } else {
         currentGroup = {
           id: message.id,
           messages: [message],
           timestamp: message.created_at,
-          type: message.kind === 'entry' ? 'entry' : 'bot'
+          type: message.kind === "entry" ? "entry" : "bot",
         };
         groups.push(currentGroup);
       }
@@ -91,14 +104,14 @@ export const useChatState = () => {
     const tempId = Date.now().toString();
     const userMessage: EntryMessage = {
       id: tempId,
-      kind: 'entry',
+      kind: "entry",
       type,
       content: trimmedContent,
       created_at: new Date().toISOString(),
-      status: 'sending'
+      status: "sending",
     };
 
-    setMessages(prevMessages => [...prevMessages, userMessage]);
+    setMessages((prevMessages) => [...prevMessages, userMessage]);
 
     try {
       await insertEntry({ type, content: trimmedContent });
@@ -107,55 +120,66 @@ export const useChatState = () => {
 
       if (saved?.id != null) {
         setIsTyping(true);
-        
+
         if (timeoutRef.current) {
           clearTimeout(timeoutRef.current);
         }
 
-        setMessages(prevMessages => 
-          prevMessages.map(msg =>
-            msg.id === tempId 
-              ? { ...msg, id: saved.id!.toString(), status: 'sent' as const } 
+        setMessages((prevMessages) =>
+          prevMessages.map((msg) =>
+            msg.id === tempId
+              ? { ...msg, id: saved.id!.toString(), status: "sent" as const }
               : msg
           )
         );
 
         timeoutRef.current = setTimeout(() => {
           setIsTyping(false);
-          
+
           const botMessage: BotMessage = {
             id: `bot-${saved.id}`,
-            kind: 'bot',
+            kind: "bot",
             afterId: saved.id!.toString(),
             content: successMessages[type],
             created_at: new Date().toISOString(),
-            status: 'sent'
+            status: "sent",
           };
-          
-          setMessages(prevMessages => [...prevMessages, botMessage]);
+
+          setMessages((prevMessages) => [...prevMessages, botMessage]);
         }, 1500);
       }
     } catch (error) {
-      setMessages(prevMessages =>
-        prevMessages.map(msg =>
-          msg.id === tempId
-            ? { ...msg, status: 'failed' as const }
-            : msg
+      setMessages((prevMessages) =>
+        prevMessages.map((msg) =>
+          msg.id === tempId ? { ...msg, status: "failed" as const } : msg
         )
       );
-      console.error('Error sending message:', error);
+      console.error("Error sending message:", error);
     }
   }, []);
 
-  const retryMessage = useCallback(async (messageId: string) => {
-    const message = messages.find(m => m.id === messageId);
-    if (!message || message.kind !== 'entry' || message.status !== 'failed') return;
+  const retryMessage = useCallback(
+    async (messageId: string) => {
+      const message = messages.find((m) => m.id === messageId);
+      if (!message || message.kind !== "entry" || message.status !== "failed")
+        return;
 
-    await sendMessage(message.content, message.type);
-    setMessages(prevMessages =>
-      prevMessages.filter(msg => msg.id !== messageId)
-    );
-  }, [messages, sendMessage]);
+      await sendMessage(message.content, message.type);
+      setMessages((prevMessages) =>
+        prevMessages.filter((msg) => msg.id !== messageId)
+      );
+    },
+    [messages, sendMessage]
+  );
+
+  const clearMessages = useCallback(async () => {
+    try {
+      await deleteAllEntries();
+      setMessages([]);
+    } catch (error) {
+      console.error("Error clearing messages:", error);
+    }
+  }, []);
 
   return {
     messages,
@@ -163,5 +187,6 @@ export const useChatState = () => {
     groupMessages,
     sendMessage,
     retryMessage,
+    clearMessages,
   };
 };

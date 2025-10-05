@@ -1,7 +1,13 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
-import { EntryType } from '../db';
-import { colors, radii, spacing } from '../theme';
+import React, { useState } from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+} from "react-native";
+import { EntryType } from "../db";
+import { colors, radii, spacing, typography, shadows } from "../theme";
 
 interface MessageInputProps {
   type: EntryType;
@@ -11,7 +17,7 @@ interface MessageInputProps {
   onSend: () => void;
 }
 
-const TYPES: EntryType[] = ['journal', 'goal', 'schedule'];
+const TYPES: EntryType[] = ["journal", "goal", "schedule"];
 
 const MessageInput: React.FC<MessageInputProps> = ({
   type,
@@ -34,7 +40,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
               onPress={() => onTypeChange(t)}
               style={[styles.typeButton, isActive && styles.typeButtonActive]}
             >
-              <Text style={[styles.typeText, isActive && styles.typeTextActive]}>
+              <Text
+                style={[styles.typeText, isActive && styles.typeTextActive]}
+              >
                 {t.toUpperCase()}
               </Text>
             </TouchableOpacity>
@@ -44,14 +52,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
       <View style={styles.inputRow}>
         <TextInput
-          style={[
-            styles.input,
-            isFocused && styles.inputFocused,
-          ]}
+          style={[styles.input, isFocused && styles.inputFocused]}
           value={content}
           onChangeText={onContentChange}
           placeholder="Type your reflection..."
-          placeholderTextColor="rgba(244,244,244,0.6)"
+          placeholderTextColor={colors.textTertiary}
           multiline
           maxLength={500}
           onFocus={() => setIsFocused(true)}
@@ -62,7 +67,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
           style={[styles.sendButton, disableSend && styles.sendButtonDisabled]}
           disabled={disableSend}
         >
-          <Text style={[styles.sendButtonText, disableSend && styles.sendButtonTextDisabled]}>
+          <Text
+            style={[
+              styles.sendButtonText,
+              disableSend && styles.sendButtonTextDisabled,
+            ]}
+          >
             Send
           </Text>
         </TouchableOpacity>
@@ -75,88 +85,94 @@ const styles = StyleSheet.create({
   wrapper: {
     padding: spacing.md,
     paddingBottom: spacing.lg,
-    backgroundColor: colors.primaryRed,
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    borderTopWidth: 1,
-    borderColor: 'rgba(229,9,20,0.4)',
+    backgroundColor: colors.background,
   },
   typeSelector: {
-    flexDirection: 'row',
+    flexDirection: "row",
     marginBottom: spacing.sm,
   },
   typeButton: {
-    paddingVertical: spacing.xs,
+    flex: 1,
+    paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-    backgroundColor: colors.carbonBlack,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
     marginRight: spacing.sm,
     borderWidth: 1,
-    borderColor: 'rgba(244,244,244,0.25)',
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
+    ...shadows.glass,
   },
   typeButtonActive: {
-    borderColor: colors.emberOrange,
-    shadowColor: colors.emberOrange,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.6,
-    shadowRadius: 8,
+    borderColor: colors.accent,
+    backgroundColor: colors.surfaceElevated,
+    ...shadows.glow,
   },
   typeText: {
-    color: 'rgba(244,244,244,0.7)',
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 1,
+    fontFamily: typography.button.fontFamily,
+    fontWeight: typography.button.fontWeight,
+    letterSpacing: typography.button.letterSpacing,
+    fontSize: 13,
+    color: colors.textSecondary,
   },
   typeTextActive: {
-    color: colors.ashWhite,
+    color: colors.textPrimary,
+    fontWeight: "700" as const,
   },
   inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
+    flexDirection: "row",
+    alignItems: "flex-end",
   },
   input: {
     flex: 1,
     minHeight: 48,
     maxHeight: 120,
-    backgroundColor: colors.carbonBlack,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
     marginRight: spacing.sm,
-    fontSize: 16,
-    color: colors.ashWhite,
+    fontFamily: typography.body.fontFamily,
+    fontWeight: typography.body.fontWeight,
+    letterSpacing: typography.body.letterSpacing,
+    fontSize: 15,
+    lineHeight: 21,
+    color: colors.textPrimary,
     borderWidth: 1,
-    borderColor: 'rgba(244,244,244,0.25)',
+    borderColor: colors.border,
   },
   inputFocused: {
-    borderColor: colors.emberOrange,
-    shadowColor: colors.primaryRed,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 10,
+    borderColor: colors.accent,
+    backgroundColor: colors.surfaceElevated,
+    ...shadows.glow,
   },
   sendButton: {
-    backgroundColor: colors.carbonBlack,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm,
+    backgroundColor: colors.accent,
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.lg,
     borderWidth: 1,
-    borderColor: colors.emberOrange,
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderColor: colors.accent,
+    justifyContent: "center",
+    alignItems: "center",
+    minHeight: 48,
+    ...shadows.glow,
   },
   sendButtonDisabled: {
-    borderColor: 'rgba(244,244,244,0.2)',
-    backgroundColor: colors.smokeGrey,
+    borderColor: colors.borderLight,
+    backgroundColor: colors.surface,
   },
   sendButtonText: {
-    color: colors.ashWhite,
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 1,
+    fontFamily: typography.button.fontFamily,
+    letterSpacing: typography.button.letterSpacing,
+    fontSize: 15,
+    fontWeight: "700" as const,
+    color: colors.textPrimary,
   },
   sendButtonTextDisabled: {
-    color: 'rgba(244,244,244,0.6)',
+    color: colors.textTertiary,
   },
 });
 

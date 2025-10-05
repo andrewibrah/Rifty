@@ -1,7 +1,7 @@
-import React, { memo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import type { ChatMessage } from '../types/chat';
-import { colors, radii, spacing } from '../theme';
+import React, { memo } from "react";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import type { ChatMessage } from "../types/chat";
+import { colors, radii, spacing, typography, shadows } from "../theme";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -10,162 +10,172 @@ interface MessageBubbleProps {
   onRetry?: (messageId: string) => void;
 }
 
-const MessageBubble = memo(({ message, isPartOfGroup, showTimestamp, onRetry }: MessageBubbleProps) => {
-  const isBot = message.kind === 'bot';
-  const hasStatus = message.status && message.status !== 'sent';
+const MessageBubble = memo(
+  ({ message, isPartOfGroup, showTimestamp, onRetry }: MessageBubbleProps) => {
+    const isBot = message.kind === "bot";
+    const hasStatus = message.status && message.status !== "sent";
 
-  const getStatusIcon = () => {
-    switch (message.status) {
-      case 'sending':
-        return '⏳';
-      case 'failed':
-        return '⚠️';
-      default:
-        return null;
-    }
-  };
+    const getStatusIcon = () => {
+      switch (message.status) {
+        case "sending":
+          return "⏳";
+        case "failed":
+          return "⚠️";
+        default:
+          return null;
+      }
+    };
 
-  const getStatusColor = () => {
-    switch (message.status) {
-      case 'sending':
-        return colors.emberOrange;
-      case 'failed':
-        return colors.primaryRed;
-      default:
-        return colors.ashWhite;
-    }
-  };
+    const getStatusColor = () => {
+      switch (message.status) {
+        case "sending":
+          return colors.warning;
+        case "failed":
+          return colors.error;
+        default:
+          return colors.textPrimary;
+      }
+    };
 
-  return (
-    <View
-      style={[
-        styles.container,
-        isBot ? styles.botContainer : styles.userContainer,
-        !isPartOfGroup && styles.firstInGroup,
-      ]}
-    >
+    return (
       <View
         style={[
-          styles.bubble,
-          isBot ? styles.botBubble : styles.userBubble,
-          hasStatus && styles.bubbleWithStatus,
+          styles.container,
+          isBot ? styles.botContainer : styles.userContainer,
+          !isPartOfGroup && styles.firstInGroup,
         ]}
       >
-        {hasStatus && (
-          <View style={styles.statusRow}>
-            <TouchableOpacity
-              onPress={() => message.status === 'failed' && onRetry?.(message.id)}
-              style={styles.statusContainer}
-            >
-              <Text style={[styles.statusIcon, { color: getStatusColor() }]}>
-                {getStatusIcon()}
-              </Text>
-              {message.status === 'failed' && (
-                <Text style={[styles.retryText, { color: getStatusColor() }]}>Tap to retry</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
-        <Text
+        <View
           style={[
-            styles.content,
-            isBot ? styles.botContent : styles.userContent,
+            styles.bubble,
+            isBot ? styles.botBubble : styles.userBubble,
+            hasStatus && styles.bubbleWithStatus,
           ]}
         >
-          {message.content}
-        </Text>
-        {message.kind === 'entry' && (
-          <Text style={styles.typeLabel}>{message.type.toUpperCase()}</Text>
+          {hasStatus && (
+            <View style={styles.statusRow}>
+              <TouchableOpacity
+                onPress={() =>
+                  message.status === "failed" && onRetry?.(message.id)
+                }
+                style={styles.statusContainer}
+              >
+                <Text style={[styles.statusIcon, { color: getStatusColor() }]}>
+                  {getStatusIcon()}
+                </Text>
+                {message.status === "failed" && (
+                  <Text style={[styles.retryText, { color: getStatusColor() }]}>
+                    Tap to retry
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+          <Text
+            style={[
+              styles.content,
+              isBot ? styles.botContent : styles.userContent,
+            ]}
+          >
+            {message.content}
+          </Text>
+          {message.kind === "entry" && (
+            <Text style={styles.typeLabel}>{message.type.toUpperCase()}</Text>
+          )}
+        </View>
+        {showTimestamp && (
+          <Text style={styles.timestamp}>
+            {new Date(message.created_at).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </Text>
         )}
       </View>
-      {showTimestamp && (
-        <Text style={styles.timestamp}>
-          {new Date(message.created_at).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </Text>
-      )}
-    </View>
-  );
-});
+    );
+  }
+);
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 2,
+    marginBottom: 10,
     marginHorizontal: spacing.sm,
-    alignItems: 'flex-end',
+    alignItems: "flex-end",
   },
   botContainer: {
-    alignItems: 'flex-start',
+    alignItems: "flex-start",
   },
   userContainer: {
-    alignItems: 'flex-end',
+    alignItems: "flex-end",
   },
   firstInGroup: {
     marginTop: spacing.md,
   },
   bubble: {
-    maxWidth: '80%',
+    maxWidth: "80%",
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.lg,
+    paddingVertical: spacing.sm + 4,
+    borderRadius: radii.md,
   },
   bubbleWithStatus: {
     paddingTop: spacing.xs,
   },
   botBubble: {
-    backgroundColor: 'rgba(229, 9, 20, 0.2)',
-    borderBottomLeftRadius: radii.xs,
+    backgroundColor: colors.surfaceElevated,
     borderWidth: 1,
-    borderColor: 'rgba(229,9,20,0.45)',
+    borderColor: colors.accent,
+    ...shadows.glass,
   },
   userBubble: {
-    backgroundColor: colors.smokeGrey,
-    borderBottomRightRadius: radii.xs,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: 'rgba(244,244,244,0.08)',
+    borderColor: colors.border,
+    ...shadows.glass,
   },
   statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: spacing.xs,
   },
   statusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   statusIcon: {
     fontSize: 14,
     marginRight: spacing.xs,
   },
   retryText: {
+    ...typography.button,
     fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    color: colors.textPrimary,
+    textTransform: "uppercase",
   },
   content: {
-    fontSize: 16,
-    lineHeight: 22,
+    fontFamily: typography.body.fontFamily,
+    fontWeight: typography.body.fontWeight,
+    letterSpacing: typography.body.letterSpacing,
+    fontSize: 15,
+    lineHeight: 21,
+    color: colors.textPrimary,
   },
   botContent: {
-    color: colors.ashWhite,
+    color: colors.textPrimary,
   },
   userContent: {
-    color: colors.ashWhite,
+    color: colors.textPrimary,
   },
   typeLabel: {
+    ...typography.caption,
     fontSize: 10,
-    fontWeight: '700',
-    color: colors.emberOrange,
+    color: colors.accent,
     marginTop: spacing.xs,
-    textAlign: 'right',
-    letterSpacing: 1,
+    textAlign: "right",
   },
   timestamp: {
+    ...typography.caption,
     fontSize: 12,
-    color: 'rgba(244,244,244,0.6)',
+    color: colors.textSecondary,
     marginTop: spacing.xs,
   },
 });
