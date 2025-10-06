@@ -13,16 +13,18 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import type { Entry, EntryType, Annotation } from "../db";
 import {
-  getEntryById,
-  listEntriesByType,
-  listAnnotationsForEntry,
-  insertAnnotation,
-  insertLearning,
-  insertEthicalRecord,
-  deleteEntry,
-} from "../db";
+  appendMessage,
+  getJournalEntryById,
+  deleteJournalEntry,
+  listJournals,
+  listMessages,
+  type EntryType,
+  type RemoteJournalEntry,
+  type RemoteMessage,
+} from "../services/data";
+import { supabase } from "../lib/supabase";
+import type { Annotation, AnnotationChannel } from "../types/annotations";
 import { generateAIResponse, formatAnnotationLabel } from "../services/ai";
 import { colors, radii, spacing, typography, shadows } from "../theme";
 
@@ -40,6 +42,8 @@ const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
   schedule: "Schedules",
 };
 
+type Entry = RemoteJournalEntry;
+
 const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
   const [mode, setMode] = useState<ViewMode>("categories");
   const [selectedType, setSelectedType] = useState<EntryType | null>(null);
@@ -47,7 +51,7 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
   const [entriesLoading, setEntriesLoading] = useState(false);
   const [entriesError, setEntriesError] = useState<string | null>(null);
 
-  const [selectedEntryId, setSelectedEntryId] = useState<number | null>(null);
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [annotationsLoading, setAnnotationsLoading] = useState(false);
@@ -58,7 +62,7 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [isWorkingWithAI, setIsWorkingWithAI] = useState(false);
   const [annotationCounts, setAnnotationCounts] = useState<
-    Record<number, number>
+    Record<string, number>
   >({});
 
   useEffect(() => {
@@ -91,18 +95,29 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
       setEntriesLoading(true);
       setEntriesError(null);
       try {
-        const items = await listEntriesByType(selectedType);
+        const items = await listJournals({ type: selectedType, limit: 100 });
         if (!isCancelled) {
           setEntries(items);
 
-          // Load annotation counts for each entry
-          const counts: Record<number, number> = {};
-          for (const item of items) {
-            if (item.id != null) {
-              const annotations = await listAnnotationsForEntry(item.id);
-              counts[item.id] = annotations.length;
-            }
-          }
+          // Stop-gap parallelization: count messages per entry via head count
+          const results = await Promise.all(
+            items.map((item) =>
+              item.id
+                ? supabase
+                    .from("messages")
+                    .select("id", { head: true, count: "exact" })
+                    .eq("conversation_id", item.id)
+                    .then(({ count }) => count ?? 0)
+                    .catch(() => 0)
+                : Promise.resolve(0)
+            )
+          );
+
+          const counts: Record<string, number> = {};
+          items.forEach((item, idx) => {
+            if (item.id) counts[item.id] = results[idx] ?? 0;
+          });
+
           setAnnotationCounts(counts);
         }
       } catch (error) {
@@ -137,14 +152,14 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
       setAnnotationsLoading(true);
       setAnnotationsError(null);
       try {
-        const [entry, entryAnnotations] = await Promise.all([
-          getEntryById(selectedEntryId),
-          listAnnotationsForEntry(selectedEntryId),
+        const [entry, messages] = await Promise.all([
+          getJournalEntryById(selectedEntryId),
+          listMessages(selectedEntryId, { limit: 200 }),
         ]);
 
         if (!isCancelled) {
           setSelectedEntry(entry);
-          setAnnotations(entryAnnotations);
+          setAnnotations(messages.map(mapMessageToAnnotation).filter(isNotNull));
         }
       } catch (error) {
         console.error("Error loading entry detail", error);
@@ -170,7 +185,7 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
     setMode("entries");
   }, []);
 
-  const handleSelectEntry = useCallback((entryId: number) => {
+  const handleSelectEntry = useCallback((entryId: string) => {
     setSelectedEntryId(entryId);
     setMode("entryChat");
     setComposerMode("note");
@@ -178,27 +193,26 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
   }, []);
 
   const handleAddNote = useCallback(async () => {
-    if (!selectedEntry || selectedEntry.id == null) return;
+    if (!selectedEntry || !selectedEntry.id) return;
     const trimmed = composerText.trim();
     if (!trimmed) return;
 
     setIsSavingNote(true);
     try {
-      const saved = await insertAnnotation({
-        entry_id: selectedEntry.id,
-        kind: "user",
+      const saved = await appendMessage(selectedEntry.id, "user", trimmed, {
         channel: "note",
-        content: trimmed,
+        messageKind: "note",
       });
-      setAnnotationsError(null);
-      setAnnotations((prev) => [...prev, saved]);
+      const annotation = mapMessageToAnnotation(saved);
+      if (annotation) {
+        setAnnotationsError(null);
+        setAnnotations((prev) => [...prev, annotation]);
+        setAnnotationCounts((prev) => ({
+          ...prev,
+          [selectedEntry.id]: (prev[selectedEntry.id] || 0) + 1,
+        }));
+      }
       setComposerText("");
-
-      // Update annotation count for this entry
-      setAnnotationCounts((prev) => ({
-        ...prev,
-        [selectedEntry.id!]: (prev[selectedEntry.id!] || 0) + 1,
-      }));
     } catch (error) {
       console.error("Error saving note", error);
       setAnnotationsError("Unable to save note right now.");
@@ -208,7 +222,7 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
   }, [composerText, selectedEntry]);
 
   const handleAskAI = useCallback(async () => {
-    if (!selectedEntry || selectedEntry.id == null) return;
+    if (!selectedEntry || !selectedEntry.id) return;
     const trimmed = composerText.trim();
     if (!trimmed) return;
 
@@ -217,12 +231,15 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
     setAnnotationsError(null);
 
     try {
-      const userAnnotation = await insertAnnotation({
-        entry_id: entryId,
-        kind: "user",
+      const userMessage = await appendMessage(entryId, "user", trimmed, {
         channel: "ai",
-        content: trimmed,
+        messageKind: "aiQuestion",
       });
+
+      const userAnnotation = mapMessageToAnnotation(userMessage);
+      if (!userAnnotation) {
+        throw new Error("Unable to record annotation for this entry.");
+      }
 
       setAnnotations((prev) => [...prev, userAnnotation]);
 
@@ -233,20 +250,19 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
         entryType: selectedEntry.type,
       });
 
-      const botAnnotation = await insertAnnotation({
-        entry_id: entryId,
-        kind: "bot",
+      const botMessage = await appendMessage(entryId, "assistant", aiResult.reply, {
         channel: "ai",
-        content: aiResult.reply,
+        messageKind: "aiReply",
+        learned: aiResult.learned,
+        ethical: aiResult.ethical,
       });
 
-      setAnnotations((prev) => [...prev, botAnnotation]);
+      const botAnnotation = mapMessageToAnnotation(botMessage);
 
-      await insertLearning({ entry_id: entryId, insight: aiResult.learned });
-      await insertEthicalRecord({
-        entry_id: entryId,
-        details: aiResult.ethical,
-      });
+      if (botAnnotation) {
+        setAnnotations((prev) => [...prev, botAnnotation]);
+      }
+      setAnnotationsError(null);
 
       setComposerText("");
 
@@ -302,7 +318,7 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
   );
 
   const handleDeleteEntry = useCallback(
-    async (id: number) => {
+    async (id: string) => {
       Alert.alert(
         "Delete Entry",
         "Are you sure you want to delete this entry? This cannot be undone.",
@@ -316,9 +332,12 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
             style: "destructive",
             onPress: async () => {
               try {
-                await deleteEntry(id);
+                await deleteJournalEntry(id);
                 // Refresh the list
-                const updatedEntries = await listEntriesByType(selectedType!);
+                const updatedEntries = await listJournals({
+                  type: selectedType!,
+                  limit: 100,
+                });
                 setEntries(updatedEntries);
               } catch (error) {
                 console.error("Error deleting entry:", error);
@@ -333,13 +352,13 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
 
   const renderEntryItem = useCallback(
     ({ item }: { item: Entry }) => {
-      const updateCount = item.id != null ? annotationCounts[item.id] || 0 : 0;
+      const updateCount = item.id ? annotationCounts[item.id] || 0 : 0;
 
       return (
         <TouchableOpacity
           style={styles.historyItem}
-          onPress={() => item.id != null && handleSelectEntry(item.id)}
-          onLongPress={() => item.id != null && handleDeleteEntry(item.id)}
+          onPress={() => item.id && handleSelectEntry(item.id)}
+          onLongPress={() => item.id && handleDeleteEntry(item.id)}
         >
           <View style={styles.historyItemContent}>
             <Text style={styles.historyItemText}>{item.content}</Text>
@@ -544,9 +563,9 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
                 style={styles.annotationListContainer}
                 data={annotations}
                 keyExtractor={(item) =>
-                  item.id != null
-                    ? item.id.toString()
-                    : `${item.entry_id}-${item.created_at ?? ""}`
+                  item.id
+                    ? item.id
+                    : `${item.entryId}-${item.created_at ?? ""}`
                 }
                 renderItem={renderAnnotationItem}
                 contentContainerStyle={styles.annotationList}
@@ -638,6 +657,55 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose }) => {
     </Modal>
   );
 };
+
+function computeAnnotationCount(messages: RemoteMessage[]): number {
+  return messages.reduce((count, message) => {
+    return mapMessageToAnnotation(message) ? count + 1 : count;
+  }, 0);
+}
+
+function mapMessageToAnnotation(message: RemoteMessage): Annotation | null {
+  const metadata = message.metadata ?? undefined;
+  const messageKind = getMessageKind(metadata);
+
+  if (messageKind === "entry" || messageKind === "autoReply") {
+    return null;
+  }
+
+  const kind: Annotation["kind"] =
+    message.role === "assistant"
+      ? "bot"
+      : message.role === "system"
+      ? "system"
+      : "user";
+
+  return {
+    id: message.id,
+    entryId: message.conversation_id,
+    kind,
+    channel: getChannel(metadata),
+    content: message.content,
+    created_at: message.created_at,
+    metadata,
+  };
+}
+
+function getChannel(metadata?: Record<string, any>): AnnotationChannel {
+  const channel = metadata?.channel;
+  if (channel === "ai" || channel === "system") {
+    return channel;
+  }
+  return "note";
+}
+
+function getMessageKind(metadata?: Record<string, any>) {
+  const kind = metadata?.messageKind;
+  return typeof kind === "string" ? kind : undefined;
+}
+
+function isNotNull<T>(value: T | null): value is T {
+  return value !== null;
+}
 
 const styles = StyleSheet.create({
   overlay: {

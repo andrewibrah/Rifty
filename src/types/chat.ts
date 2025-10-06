@@ -1,4 +1,4 @@
-import { EntryType } from '../db';
+import type { EntryType } from '../services/data';
 
 export interface Message {
   id: string;

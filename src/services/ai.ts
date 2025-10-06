@@ -1,6 +1,5 @@
 import Constants from "expo-constants";
-import { Annotation } from "../db";
-import type { AnnotationChannel } from "../db";
+import type { Annotation, AnnotationChannel } from "../types/annotations";
 
 type AIResponse = {
   reply: string;
@@ -37,11 +36,16 @@ export async function generateAIResponse(params: {
   userMessage: string;
   entryType: string;
 }): Promise<AIResponse> {
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 45000);
+ 
+  const extra = Constants?.expoConfig?.extra as any;
+
   const apiKey =
-    params.apiKey ||
-    process.env.EXPO_PUBLIC_OPENAI_API_KEY ||
-    (Constants?.expoConfig?.extra as any)?.openaiApiKey ||
-    (Constants?.expoConfig?.extra as any)?.EXPO_PUBLIC_OPENAI_API_KEY;
+  params.apiKey ||
+  extra?.openaiApiKey ||
+  extra?.EXPO_PUBLIC_OPENAI_API_KEY ||
+  extra?.OPENAI_API_KEY;
 
   if (!apiKey) {
     throw new Error(
@@ -113,21 +117,38 @@ New user request: ${params.userMessage}`;
     },
   };
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
+  let data: any;
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
 
-  if (!res.ok) {
-    const errorBody = await res.text();
-    throw new Error(`OpenAI request failed (${res.status}): ${errorBody}`);
+    if (!res.ok) {
+      const errorBody = await res.text();
+      console.warn(`[OpenAI] ${res.status}: ${errorBody.slice(0, 200)}…`);
+      throw new Error(
+        res.status === 401
+          ? "AI request unauthorized. Check API key."
+          : "AI request failed. Please retry in a moment."
+      );
+    }
+
+    data = await res.json();
+  } catch (e: any) {
+    if (e?.name === "AbortError") {
+      throw new Error("AI request timed out. Please try again.");
+    }
+    console.warn("[OpenAI] request error", e?.message || e);
+    throw new Error("AI request failed. Please retry in a moment.");
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const data = await res.json();
 
   // Tool/function calling: parse JSON from tool call arguments
   const msg = data?.choices?.[0]?.message;

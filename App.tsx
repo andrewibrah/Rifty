@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
+  AppState,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -12,19 +13,32 @@ import {
   View,
   Vibration,
 } from "react-native";
-import { initDB, type EntryType } from "./src/db";
+import type { Session } from "@supabase/supabase-js";
+import { type EntryType } from "./src/services/data";
 import ChatHeader from "./src/components/ChatHeader";
 import MessageBubble from "./src/components/MessageBubble";
 import TypingIndicator from "./src/components/TypingIndicator";
 import MessageInput from "./src/components/MessageInput";
 import HistoryModal from "./src/components/HistoryModal";
+import Auth from "./src/components/Auth";
 import { useChatState } from "./src/hooks/useChatState";
 import type { MessageGroup } from "./src/types/chat";
 import { colors, spacing, radii, typography, shadows } from "./src/theme";
+import { supabase } from "./src/lib/supabase";
+import purgeLocal from "./src/utils/purgeLocal";
+import Constants from "expo-constants";
 
 const SPLASH_DURATION = 2500;
+const MIGRATION_FLAG = (
+  String(
+    (Constants.expoConfig?.extra as Record<string, any> | undefined)?.
+      MIGRATION_2025_10_REMOVE_LOCAL_DB
+  )
+    .toLowerCase()
+    .trim() === "true"
+);
 
-const App = () => {
+const ChatScreen: React.FC = () => {
   const listRef = useRef<FlatList<MessageGroup>>(null);
   const {
     messages,
@@ -45,8 +59,6 @@ const App = () => {
   const flameScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    initDB();
-
     const flameLoop = Animated.loop(
       Animated.sequence([
         Animated.parallel([
@@ -216,9 +228,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  authWrapper: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  authSafeArea: {
+    flex: 1,
+    justifyContent: "center",
+    padding: spacing.lg,
   },
   flex: {
     flex: 1,
@@ -293,5 +314,80 @@ const styles = StyleSheet.create({
     height: 120,
   },
 });
+
+const App: React.FC = () => {
+  const [session, setSession] = useState<Session | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
+  const purgeRequestedRef = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+
+    if (MIGRATION_FLAG && __DEV__ && !purgeRequestedRef.current) {
+      purgeRequestedRef.current = true;
+      purgeLocal().catch((error) => {
+        console.warn("Failed to purge local storage", error);
+      });
+    }
+
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!active) return;
+        setSession(data.session ?? null);
+        setCheckingSession(false);
+      })
+      .catch((error) => {
+        console.error("Failed to load auth session", error);
+        if (active) {
+          setCheckingSession(false);
+        }
+      });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!active) return;
+      setSession(nextSession);
+      setCheckingSession(false);
+    });
+
+    const stateListener = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        supabase.auth.startAutoRefresh();
+      } else {
+        supabase.auth.stopAutoRefresh();
+      }
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+      stateListener.remove();
+      supabase.auth.stopAutoRefresh();
+    };
+  }, []);
+
+  if (checkingSession) {
+    return (
+      <View style={styles.root}>
+        <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      </View>
+    );
+  }
+
+  if (!session) {
+    return (
+      <View style={[styles.root, styles.authWrapper]}>
+        <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+        <SafeAreaView style={[styles.safeArea, styles.authSafeArea]}>
+          <Auth />
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  return <ChatScreen />;
+};
 
 export default App;

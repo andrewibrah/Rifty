@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
 } from "react-native";
-import { EntryType } from "../db";
+import type { EntryType } from "../services/data";
 import { colors, radii, spacing, typography, shadows } from "../theme";
 
 interface MessageInputProps {

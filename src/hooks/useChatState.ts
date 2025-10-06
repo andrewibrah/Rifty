@@ -5,8 +5,13 @@ import type {
   EntryMessage,
   BotMessage,
 } from "../types/chat";
-import { insertEntry, listEntries, deleteAllEntries, initDB } from "../db";
-import type { EntryType } from "../db";
+import {
+  appendMessage,
+  createJournalEntry,
+  deleteAllJournalEntries,
+  listJournals,
+  type EntryType,
+} from "../services/data";
 
 const successMessages: Record<EntryType, string> = {
   goal: "Saved. Keep up your hard work.",
@@ -17,25 +22,32 @@ const successMessages: Record<EntryType, string> = {
 export const useChatState = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined
-  );
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadMessages = useCallback(async () => {
     try {
-      // Ensure database is initialized
-      await initDB();
-      const entries = await listEntries();
+      const entries = await listJournals({ limit: 200 });
       const chatMessages: ChatMessage[] = [];
 
-      entries.forEach((entry) => {
-        if (entry.id != null) {
+      entries
+        .slice()
+        .sort(
+          (a, b) =>
+            new Date(a.created_at).getTime() -
+            new Date(b.created_at).getTime()
+        )
+        .forEach((entry) => {
+          if (!entry.id) {
+            return;
+          }
+
+          const createdAt = entry.created_at || new Date().toISOString();
           const entryMessage: EntryMessage = {
-            id: entry.id.toString(),
+            id: entry.id,
             kind: "entry",
             type: entry.type,
             content: entry.content,
-            created_at: entry.created_at || new Date().toISOString(),
+            created_at: createdAt,
             status: "sent",
           };
           chatMessages.push(entryMessage);
@@ -43,14 +55,13 @@ export const useChatState = () => {
           const botMessage: BotMessage = {
             id: `bot-${entry.id}`,
             kind: "bot",
-            afterId: entry.id.toString(),
+            afterId: entry.id,
             content: successMessages[entry.type],
-            created_at: entry.created_at || new Date().toISOString(),
+            created_at: createdAt,
             status: "sent",
           };
           chatMessages.push(botMessage);
-        }
-      });
+        });
 
       setMessages(chatMessages);
     } catch (error) {
@@ -60,6 +71,12 @@ export const useChatState = () => {
 
   useEffect(() => {
     loadMessages();
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
   }, [loadMessages]);
 
   const groupMessages = useCallback((msgs: ChatMessage[]): MessageGroup[] => {
@@ -114,11 +131,13 @@ export const useChatState = () => {
     setMessages((prevMessages) => [...prevMessages, userMessage]);
 
     try {
-      await insertEntry({ type, content: trimmedContent });
-      const entries = await listEntries();
-      const saved = entries[entries.length - 1];
+      const saved = await createJournalEntry({
+        type,
+        content: trimmedContent,
+      });
 
-      if (saved?.id != null) {
+      if (saved?.id) {
+        const entryId = saved.id;
         setIsTyping(true);
 
         if (timeoutRef.current) {
@@ -128,24 +147,39 @@ export const useChatState = () => {
         setMessages((prevMessages) =>
           prevMessages.map((msg) =>
             msg.id === tempId
-              ? { ...msg, id: saved.id!.toString(), status: "sent" as const }
+              ? { ...msg, id: entryId, status: "sent" as const }
               : msg
           )
         );
+
+        appendMessage(entryId, "user", trimmedContent, {
+          messageKind: "entry",
+          entryType: type,
+        }).catch((error) => {
+          console.error("Unable to record entry message", error);
+        });
 
         timeoutRef.current = setTimeout(() => {
           setIsTyping(false);
 
           const botMessage: BotMessage = {
-            id: `bot-${saved.id}`,
+            id: `bot-${entryId}`,
             kind: "bot",
-            afterId: saved.id!.toString(),
+            afterId: entryId,
             content: successMessages[type],
             created_at: new Date().toISOString(),
             status: "sent",
           };
 
           setMessages((prevMessages) => [...prevMessages, botMessage]);
+
+          appendMessage(entryId, "assistant", successMessages[type], {
+            messageKind: "autoReply",
+            entryType: type,
+            afterId: entryId,
+          }).catch((error) => {
+            console.error("Unable to record auto-reply", error);
+          });
         }, 1500);
       }
     } catch (error) {
@@ -174,7 +208,7 @@ export const useChatState = () => {
 
   const clearMessages = useCallback(async () => {
     try {
-      await deleteAllEntries();
+      await deleteAllJournalEntries();
       setMessages([]);
     } catch (error) {
       console.error("Error clearing messages:", error);
