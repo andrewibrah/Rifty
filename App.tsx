@@ -19,26 +19,34 @@ import ChatHeader from "./src/components/ChatHeader";
 import MessageBubble from "./src/components/MessageBubble";
 import TypingIndicator from "./src/components/TypingIndicator";
 import MessageInput from "./src/components/MessageInput";
-import HistoryModal from "./src/components/HistoryModal";
+import MenuModal from "./src/components/MenuModal";
 import Auth from "./src/components/Auth";
 import { useChatState } from "./src/hooks/useChatState";
 import type { MessageGroup } from "./src/types/chat";
-import { colors, spacing, radii, typography, shadows } from "./src/theme";
+import { getColors, spacing, radii, typography, shadows } from "./src/theme";
+import { useTheme } from "./src/contexts/ThemeContext";
 import { supabase } from "./src/lib/supabase";
 import purgeLocal from "./src/utils/purgeLocal";
 import Constants from "expo-constants";
+import { ThemeProvider } from "./src/contexts/ThemeContext";
 
 const SPLASH_DURATION = 2500;
-const MIGRATION_FLAG = (
+const MIGRATION_FLAG =
   String(
-    (Constants.expoConfig?.extra as Record<string, any> | undefined)?.
-      MIGRATION_2025_10_REMOVE_LOCAL_DB
+    (Constants.expoConfig?.extra as Record<string, any> | undefined)
+      ?.MIGRATION_2025_10_REMOVE_LOCAL_DB
   )
     .toLowerCase()
-    .trim() === "true"
-);
+    .trim() === "true";
 
-const ChatScreen: React.FC = () => {
+interface ChatScreenProps {
+  session: Session;
+}
+
+const ChatScreen: React.FC<ChatScreenProps> = ({ session }) => {
+  const { themeMode } = useTheme();
+  const colors = getColors(themeMode);
+  const styles = createStyles(colors);
   const listRef = useRef<FlatList<MessageGroup>>(null);
   const {
     messages,
@@ -51,7 +59,7 @@ const ChatScreen: React.FC = () => {
 
   const [type, setType] = useState<EntryType>("journal");
   const [content, setContent] = useState("");
-  const [showHistory, setShowHistory] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [isSplashVisible, setIsSplashVisible] = useState(true);
 
   const splashOpacity = useRef(new Animated.Value(1)).current;
@@ -152,21 +160,26 @@ const ChatScreen: React.FC = () => {
           style={styles.flex}
         >
           <ChatHeader
-            onHistoryPress={() => setShowHistory(true)}
+            onHistoryPress={() => setShowMenu(true)}
             onClearPress={clearMessages}
             hasContent={messages.length > 0}
           />
 
           <View style={styles.messageContainer}>
-            {messages.length === 0 && (
-              <View style={styles.emptyStateContainer}>
-                <Image
-                  source={require("./assets/logo.png")}
-                  style={styles.emptyStateLogo}
-                  resizeMode="contain"
-                />
-              </View>
-            )}
+            {/* Background Logo */}
+            <View style={styles.backgroundLogoContainer}>
+              <Image
+                source={require("./assets/logo.png")}
+                style={[
+                  styles.backgroundLogo,
+                  {
+                    tintColor: colors.textTertiary,
+                    opacity: themeMode === "light" ? 0.3 : 0.1,
+                  },
+                ]}
+                resizeMode="contain"
+              />
+            </View>
             <FlatList
               ref={listRef}
               data={messageGroups}
@@ -200,9 +213,10 @@ const ChatScreen: React.FC = () => {
         </KeyboardAvoidingView>
       </SafeAreaView>
 
-      <HistoryModal
-        visible={showHistory}
-        onClose={() => setShowHistory(false)}
+      <MenuModal
+        visible={showMenu}
+        onClose={() => setShowMenu(false)}
+        session={session}
       />
 
       {isSplashVisible && (
@@ -223,97 +237,101 @@ const ChatScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  authWrapper: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  authSafeArea: {
-    flex: 1,
-    justifyContent: "center",
-    padding: spacing.lg,
-  },
-  flex: {
-    flex: 1,
-    position: "relative",
-  },
-  backgroundGlow: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 220,
-    backgroundColor: colors.accent,
-    opacity: 0.08,
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-  },
-  messageContainer: {
-    flex: 1,
-    position: "relative",
-  },
-  emptyStateContainer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: "center",
-    alignItems: "center",
-    pointerEvents: "none",
-  },
-  emptyStateLogo: {
-    width: 150,
-    height: 150,
-    opacity: 0.05,
-  },
-  messageList: {
-    flex: 1,
-  },
-  listContent: {
-    flexGrow: 1,
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.xl,
-    paddingTop: spacing.lg,
-  },
-  messageGroup: {
-    marginBottom: spacing.lg,
-  },
-  splashContainer: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.background,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  splashContent: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  splashGlow: {
-    position: "absolute",
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: colors.accent,
-    opacity: 0.15,
-    shadowColor: colors.accent,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 60,
-  },
-  splashLogo: {
-    width: 120,
-    height: 120,
-  },
-});
+const createStyles = (colors: any) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    authWrapper: {
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    authSafeArea: {
+      flex: 1,
+      justifyContent: "center",
+      padding: spacing.lg,
+    },
+    flex: {
+      flex: 1,
+      position: "relative",
+    },
+    messageContainer: {
+      flex: 1,
+      position: "relative",
+    },
+    backgroundLogoContainer: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      justifyContent: "center",
+      alignItems: "center",
+      pointerEvents: "none",
+    },
+    backgroundLogo: {
+      width: 120,
+      height: 120,
+    },
+    messageList: {
+      flex: 1,
+    },
+    listContent: {
+      flexGrow: 1,
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.xl,
+      paddingTop: spacing.lg,
+    },
+    messageGroup: {
+      marginBottom: spacing.lg,
+    },
+    splashContainer: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: colors.background,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    splashContent: {
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    splashLogo: {
+      width: 120,
+      height: 120,
+    },
+  });
+
+const LoadingScreen: React.FC = () => {
+  const { themeMode } = useTheme();
+  const colors = getColors(themeMode);
+  const styles = createStyles(colors);
+
+  return (
+    <View style={styles.root}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+    </View>
+  );
+};
+
+const AuthScreen: React.FC = () => {
+  const { themeMode } = useTheme();
+  const colors = getColors(themeMode);
+  const styles = createStyles(colors);
+
+  return (
+    <View style={[styles.root, styles.authWrapper]}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      <SafeAreaView style={[styles.safeArea, styles.authSafeArea]}>
+        <Auth />
+      </SafeAreaView>
+    </View>
+  );
+};
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
@@ -370,24 +388,25 @@ const App: React.FC = () => {
 
   if (checkingSession) {
     return (
-      <View style={styles.root}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.background} />
-      </View>
+      <ThemeProvider>
+        <LoadingScreen />
+      </ThemeProvider>
     );
   }
 
   if (!session) {
     return (
-      <View style={[styles.root, styles.authWrapper]}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.background} />
-        <SafeAreaView style={[styles.safeArea, styles.authSafeArea]}>
-          <Auth />
-        </SafeAreaView>
-      </View>
+      <ThemeProvider>
+        <AuthScreen />
+      </ThemeProvider>
     );
   }
 
-  return <ChatScreen />;
+  return (
+    <ThemeProvider>
+      <ChatScreen session={session} />
+    </ThemeProvider>
+  );
 };
 
 export default App;

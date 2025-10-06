@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
+import { ThemeMode } from "../contexts/ThemeContext";
 
-export const colors = {
+const darkColors = {
   // Modern glass theme
   background: "#0A0A0B",
   surface: "rgba(255, 255, 255, 0.05)",
@@ -26,6 +27,40 @@ export const colors = {
   warning: "#F59E0B",
   error: "#EF4444",
 };
+
+const lightColors = {
+  // Light theme
+  background: "#FFFFFF",
+  surface: "rgba(0, 0, 0, 0.05)",
+  surfaceElevated: "rgba(0, 0, 0, 0.08)",
+  surfaceGlass: "rgba(0, 0, 0, 0.1)",
+
+  // Text colors
+  textPrimary: "#000000",
+  textSecondary: "rgba(0, 0, 0, 0.7)",
+  textTertiary: "rgba(0, 0, 0, 0.5)",
+
+  // Accent colors
+  accent: "#6366F1", // Modern indigo
+  accentLight: "#818CF8",
+  accentDark: "#4F46E5",
+
+  // Glass borders
+  border: "rgba(0, 0, 0, 0.1)",
+  borderLight: "rgba(0, 0, 0, 0.05)",
+
+  // Status colors
+  success: "#10B981",
+  warning: "#F59E0B",
+  error: "#EF4444",
+};
+
+export const getColors = (themeMode: ThemeMode = 'dark') => {
+  return themeMode === 'dark' ? darkColors : lightColors;
+};
+
+// Default export for backward compatibility
+export const colors = darkColors;
 
 export const spacing = {
   xs: 4,

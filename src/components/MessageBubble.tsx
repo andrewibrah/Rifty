@@ -1,7 +1,8 @@
-import React, { memo } from "react";
+import React, { memo, useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import type { ChatMessage } from "../types/chat";
-import { colors, radii, spacing, typography, shadows } from "../theme";
+import { getColors, radii, spacing, typography, shadows } from "../theme";
+import { useTheme } from "../contexts/ThemeContext";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -12,6 +13,9 @@ interface MessageBubbleProps {
 
 const MessageBubble = memo(
   ({ message, isPartOfGroup, showTimestamp, onRetry }: MessageBubbleProps) => {
+    const { themeMode } = useTheme();
+    const colors = getColors(themeMode);
+    const styles = useMemo(() => createStyles(colors), [colors]);
     const isBot = message.kind === "bot";
     const hasStatus = message.status && message.status !== "sent";
 
@@ -96,88 +100,89 @@ const MessageBubble = memo(
   }
 );
 
-const styles = StyleSheet.create({
-  container: {
-    marginBottom: 10,
-    marginHorizontal: spacing.sm,
-    alignItems: "flex-end",
-  },
-  botContainer: {
-    alignItems: "flex-start",
-  },
-  userContainer: {
-    alignItems: "flex-end",
-  },
-  firstInGroup: {
-    marginTop: spacing.md,
-  },
-  bubble: {
-    maxWidth: "80%",
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 4,
-    borderRadius: radii.md,
-  },
-  bubbleWithStatus: {
-    paddingTop: spacing.xs,
-  },
-  botBubble: {
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: colors.accent,
-    ...shadows.glass,
-  },
-  userBubble: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadows.glass,
-  },
-  statusRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: spacing.xs,
-  },
-  statusContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  statusIcon: {
-    fontSize: 14,
-    marginRight: spacing.xs,
-  },
-  retryText: {
-    ...typography.button,
-    fontSize: 12,
-    color: colors.textPrimary,
-    textTransform: "uppercase",
-  },
-  content: {
-    fontFamily: typography.body.fontFamily,
-    fontWeight: typography.body.fontWeight,
-    letterSpacing: typography.body.letterSpacing,
-    fontSize: 15,
-    lineHeight: 21,
-    color: colors.textPrimary,
-  },
-  botContent: {
-    color: colors.textPrimary,
-  },
-  userContent: {
-    color: colors.textPrimary,
-  },
-  typeLabel: {
-    ...typography.caption,
-    fontSize: 10,
-    color: colors.accent,
-    marginTop: spacing.xs,
-    textAlign: "right",
-  },
-  timestamp: {
-    ...typography.caption,
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
-  },
-});
+const createStyles = (colors: any) =>
+  StyleSheet.create({
+    container: {
+      marginBottom: 10,
+      marginHorizontal: spacing.sm,
+      alignItems: "flex-end",
+    },
+    botContainer: {
+      alignItems: "flex-start",
+    },
+    userContainer: {
+      alignItems: "flex-end",
+    },
+    firstInGroup: {
+      marginTop: spacing.md,
+    },
+    bubble: {
+      maxWidth: "80%",
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm + 4,
+      borderRadius: radii.md,
+    },
+    bubbleWithStatus: {
+      paddingTop: spacing.xs,
+    },
+    botBubble: {
+      backgroundColor: colors.surfaceElevated,
+      borderWidth: 1,
+      borderColor: colors.accent,
+      ...shadows.glass,
+    },
+    userBubble: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      ...shadows.glass,
+    },
+    statusRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: spacing.xs,
+    },
+    statusContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    statusIcon: {
+      fontSize: 14,
+      marginRight: spacing.xs,
+    },
+    retryText: {
+      ...typography.button,
+      fontSize: 12,
+      color: colors.textPrimary,
+      textTransform: "uppercase",
+    },
+    content: {
+      fontFamily: typography.body.fontFamily,
+      fontWeight: typography.body.fontWeight,
+      letterSpacing: typography.body.letterSpacing,
+      fontSize: 15,
+      lineHeight: 21,
+      color: colors.textPrimary,
+    },
+    botContent: {
+      color: colors.textPrimary,
+    },
+    userContent: {
+      color: colors.textPrimary,
+    },
+    typeLabel: {
+      ...typography.caption,
+      fontSize: 10,
+      color: colors.accent,
+      marginTop: spacing.xs,
+      textAlign: "right",
+    },
+    timestamp: {
+      ...typography.caption,
+      fontSize: 12,
+      color: colors.textSecondary,
+      marginTop: spacing.xs,
+    },
+  });
 
 export default MessageBubble;
