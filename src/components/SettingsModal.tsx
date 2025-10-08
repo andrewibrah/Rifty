@@ -1,12 +1,12 @@
 import React, { useMemo } from "react";
 import {
   Modal,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
 import { getColors, radii, spacing, typography } from "../theme";

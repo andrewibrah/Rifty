@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useMemo } from "react";
+import React, { useCallback, useState, useMemo, useEffect } from "react";
 import {
   View,
   Text,
@@ -7,10 +7,16 @@ import {
   FlatList,
   ActivityIndicator,
   StyleSheet,
+  ScrollView,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
 } from "react-native";
 import type { Annotation } from "../../types/annotations";
 import type { RemoteJournalEntry, EntryType } from "../../services/data";
 import { appendMessage } from "../../services/data";
+import { supabase } from "../../lib/supabase";
 import { generateAIResponse, formatAnnotationLabel } from "../../services/ai";
 import { getColors, radii, spacing, typography, shadows } from "../../theme";
 import { useTheme } from "../../contexts/ThemeContext";
@@ -23,6 +29,9 @@ interface MenuEntryChatProps {
   onAnnotationsUpdate: (annotations: Annotation[]) => void;
   onAnnotationCountUpdate: (entryId: string, delta: number) => void;
   onErrorUpdate: (error: string | null) => void;
+  onModeChange?: (mode: "note" | "ai") => void;
+  onRefreshAnnotations?: () => void;
+  onClearAIChat?: () => void;
 }
 
 type ComposerMode = "note" | "ai";
@@ -35,6 +44,9 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
   onAnnotationsUpdate,
   onAnnotationCountUpdate,
   onErrorUpdate,
+  onModeChange,
+  onRefreshAnnotations,
+  onClearAIChat,
 }) => {
   const { themeMode } = useTheme();
   const colors = getColors(themeMode);
@@ -43,6 +55,11 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
   const [composerText, setComposerText] = useState("");
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [isWorkingWithAI, setIsWorkingWithAI] = useState(false);
+
+  // Notify parent component when mode changes
+  useEffect(() => {
+    onModeChange?.(composerMode);
+  }, [composerMode, onModeChange]);
 
   const handleAddNote = useCallback(async () => {
     if (!entry || !entry.id) return;
@@ -142,7 +159,6 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
       onAnnotationsUpdate([...updatedAnnotations, botAnnotation]);
       onErrorUpdate(null);
       setComposerText("");
-      onAnnotationCountUpdate(entryId, 2);
     } catch (error) {
       console.error("Error requesting AI guidance", error);
       onErrorUpdate(
@@ -164,7 +180,37 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
 
   const renderAnnotationItem = useCallback(({ item }: { item: Annotation }) => {
     const isUser = item.kind === "user";
+    const isNote = item.channel === "note";
     const label = formatAnnotationLabel(item.channel);
+
+    // Render notes as elegant journal entries
+    if (isNote) {
+      return (
+        <Pressable
+          style={({ pressed }) => [
+            styles.noteEntry,
+            pressed && styles.noteEntryPressed,
+          ]}
+          onLongPress={() => {
+            if (item.id) {
+              handleDeleteNote(item.id);
+            }
+          }}
+          delayLongPress={500}
+        >
+          <View style={styles.noteContent}>
+            <Text style={styles.noteText}>{item.content}</Text>
+            {item.created_at && (
+              <Text style={styles.noteTimestamp}>
+                {new Date(item.created_at).toLocaleDateString()}
+              </Text>
+            )}
+          </View>
+        </Pressable>
+      );
+    }
+
+    // Render AI chat as bubbles
     return (
       <View
         style={[
@@ -217,8 +263,73 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
   const disableNoteSend = isSavingNote || !composerText.trim();
   const disableAISend = isWorkingWithAI || !composerText.trim();
 
+  const handleDeleteNote = useCallback(
+    async (annotationId: string) => {
+      Alert.alert(
+        "Delete Note",
+        "This note will be permanently deleted. This action cannot be undone.",
+        [
+          {
+            text: "Cancel",
+            style: "cancel",
+          },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                // Delete from Supabase only - no local state manipulation
+                const { error } = await supabase
+                  .from("messages")
+                  .delete()
+                  .eq("id", annotationId);
+
+                if (error) {
+                  throw error;
+                }
+
+                // Update the note counter for deletion
+                onAnnotationCountUpdate(entry.id, -1);
+
+                // Refresh annotations from Supabase to get the updated state
+                if (onRefreshAnnotations) {
+                  onRefreshAnnotations();
+                }
+              } catch (error) {
+                console.error("Error deleting note", error);
+                onErrorUpdate("Unable to delete note right now.");
+              }
+            },
+          },
+        ]
+      );
+    },
+    [
+      annotations,
+      entry.id,
+      onAnnotationsUpdate,
+      onAnnotationCountUpdate,
+      onErrorUpdate,
+      onRefreshAnnotations,
+    ]
+  );
+
+  // Separate annotations by channel
+  const noteAnnotations = annotations.filter(
+    (annotation) => annotation.channel === "note"
+  );
+  const aiAnnotations = annotations.filter(
+    (annotation) => annotation.channel === "ai"
+  );
+
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+      enabled={true}
+    >
+      {/* Static Header - Entry Summary */}
       {entry && (
         <View style={styles.entrySummary}>
           <Text style={styles.entrySummaryContent}>{entry.content}</Text>
@@ -230,27 +341,78 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         </View>
       )}
 
-      {loading && (
-        <ActivityIndicator
-          style={styles.loadingIndicator}
-          color={colors.textPrimary}
-        />
-      )}
-      {error && <Text style={styles.errorText}>{error}</Text>}
-      {!loading && annotations.length === 0 && !error && (
-        <Text style={styles.emptyState}>
-          No updates yet. Add your first note below.
-        </Text>
-      )}
-      <FlatList
-        style={styles.annotationListContainer}
-        data={annotations}
-        keyExtractor={(item) =>
-          item.id ? item.id : `${item.entryId}-${item.created_at ?? ""}`
-        }
-        renderItem={renderAnnotationItem}
-        contentContainerStyle={styles.annotationList}
-      />
+      <ScrollView
+        style={styles.scrollContainer}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={true}
+        nestedScrollEnabled={true}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        automaticallyAdjustKeyboardInsets={true}
+        bounces={false}
+        alwaysBounceVertical={false}
+        scrollEnabled={true}
+        removeClippedSubviews={false}
+        overScrollMode="never"
+        scrollEventThrottle={16}
+        maximumZoomScale={1}
+        minimumZoomScale={1}
+      >
+        {loading && (
+          <ActivityIndicator
+            style={styles.loadingIndicator}
+            color={colors.textPrimary}
+          />
+        )}
+        {error && <Text style={styles.errorText}>{error}</Text>}
+
+        {/* Notes Section */}
+        {composerMode === "note" && (
+          <View style={styles.sectionContainer}>
+            {!loading && noteAnnotations.length === 0 && !error && (
+              <View style={styles.emptyStateContainer}>
+                <Text style={styles.emptyState}>
+                  No notes yet. Add your first note below.
+                </Text>
+                <Text style={styles.emptyStateHint}>
+                  Long-press any note to delete it
+                </Text>
+              </View>
+            )}
+            {noteAnnotations.map((annotation) => (
+              <View
+                key={
+                  annotation.id ||
+                  `${annotation.entryId}-${annotation.created_at ?? ""}`
+                }
+              >
+                {renderAnnotationItem({ item: annotation })}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* AI Chat Section */}
+        {composerMode === "ai" && (
+          <View style={styles.sectionContainer}>
+            {!loading && aiAnnotations.length === 0 && !error && (
+              <Text style={styles.emptyState}>
+                No AI conversation yet. Ask a question below.
+              </Text>
+            )}
+            {aiAnnotations.map((annotation) => (
+              <View
+                key={
+                  annotation.id ||
+                  `${annotation.entryId}-${annotation.created_at ?? ""}`
+                }
+              >
+                {renderAnnotationItem({ item: annotation })}
+              </View>
+            ))}
+          </View>
+        )}
+      </ScrollView>
 
       <View style={styles.noteInputRow}>
         <View style={styles.modeSwitcher}>
@@ -327,7 +489,7 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
           </Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -338,6 +500,78 @@ const createStyles = (colors: any) =>
       backgroundColor: colors.background,
       paddingHorizontal: spacing.lg,
       paddingBottom: spacing.lg,
+    },
+    scrollContainer: {
+      flex: 1,
+    },
+    scrollContent: {
+      paddingBottom: spacing.md,
+      flexGrow: 1,
+    },
+    sectionContainer: {
+      marginBottom: spacing.lg,
+    },
+    sectionTitle: {
+      fontFamily: typography.heading.fontFamily,
+      fontWeight: typography.heading.fontWeight,
+      letterSpacing: typography.heading.letterSpacing,
+      fontSize: 18,
+      color: colors.textPrimary,
+      marginBottom: spacing.md,
+      paddingTop: spacing.md,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    noteEntry: {
+      backgroundColor: colors.surface,
+      borderRadius: radii.md,
+      marginBottom: spacing.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+      overflow: "hidden",
+      ...shadows.glass,
+    },
+    noteEntryPressed: {
+      backgroundColor: colors.surfaceElevated,
+      transform: [{ scale: 0.98 }],
+    },
+    noteContent: {
+      padding: spacing.md,
+    },
+    noteText: {
+      fontFamily: typography.body.fontFamily,
+      fontWeight: typography.body.fontWeight,
+      letterSpacing: typography.body.letterSpacing,
+      fontSize: 15,
+      lineHeight: 22,
+      color: colors.textPrimary,
+      marginBottom: spacing.xs,
+    },
+    noteTimestamp: {
+      fontFamily: typography.caption.fontFamily,
+      fontWeight: typography.caption.fontWeight,
+      letterSpacing: typography.caption.letterSpacing,
+      fontSize: 12,
+      color: colors.textSecondary,
+      textAlign: "left",
+    },
+    deleteButton: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: colors.surfaceElevated,
+      justifyContent: "center",
+      alignItems: "center",
+      borderWidth: 1,
+      borderColor: colors.border,
+      zIndex: 10,
+    },
+    deleteButtonText: {
+      fontFamily: typography.heading.fontFamily,
+      fontWeight: typography.heading.fontWeight,
+      fontSize: 18,
+      color: colors.textSecondary,
+      lineHeight: 18,
     },
     entrySummary: {
       paddingVertical: spacing.md,
@@ -375,11 +609,17 @@ const createStyles = (colors: any) =>
       fontSize: 16,
       color: colors.textSecondary,
     },
-    annotationList: {
-      paddingBottom: spacing.md,
+    emptyStateContainer: {
+      alignItems: "center",
     },
-    annotationListContainer: {
-      flex: 1,
+    emptyStateHint: {
+      paddingVertical: spacing.xs,
+      fontFamily: typography.caption.fontFamily,
+      fontWeight: typography.caption.fontWeight,
+      letterSpacing: typography.caption.letterSpacing,
+      fontSize: 12,
+      color: colors.textTertiary,
+      fontStyle: "italic",
     },
     annotationBubbleRow: {
       flexDirection: "row",

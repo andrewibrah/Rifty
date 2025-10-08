@@ -1,18 +1,23 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
   AppState,
   FlatList,
   Image,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
   View,
-  Vibration,
 } from "react-native";
+import { SafeAreaView, SafeAreaProvider } from "react-native-safe-area-context";
+import {
+  GestureHandlerRootView,
+  Gesture,
+  GestureDetector,
+} from "react-native-gesture-handler";
 import type { Session } from "@supabase/supabase-js";
 import { type EntryType } from "./src/services/data";
 import ChatHeader from "./src/components/ChatHeader";
@@ -22,6 +27,7 @@ import MessageInput from "./src/components/MessageInput";
 import MenuModal from "./src/components/MenuModal";
 import Auth from "./src/components/Auth";
 import { useChatState } from "./src/hooks/useChatState";
+import { useMenuState } from "./src/hooks/useMenuState";
 import type { MessageGroup } from "./src/types/chat";
 import { getColors, spacing, radii, typography, shadows } from "./src/theme";
 import { useTheme } from "./src/contexts/ThemeContext";
@@ -48,6 +54,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ session }) => {
   const colors = getColors(themeMode);
   const styles = createStyles(colors);
   const listRef = useRef<FlatList<MessageGroup>>(null);
+  // Menu state for refreshing entry counts
+  const menuState = useMenuState();
+
   const {
     messages,
     isTyping,
@@ -55,7 +64,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ session }) => {
     sendMessage,
     retryMessage,
     clearMessages,
-  } = useChatState();
+  } = useChatState(menuState.refreshAllEntryCounts);
 
   const [type, setType] = useState<EntryType>("journal");
   const [content, setContent] = useState("");
@@ -106,7 +115,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ session }) => {
       }).start(() => {
         setIsSplashVisible(false);
         flameLoop.stop();
-        Vibration.vibrate(30);
       });
     }, SPLASH_DURATION);
 
@@ -151,72 +159,173 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ session }) => {
     </View>
   );
 
+  // Gesture handling for swipe to open menu
+  const mainContentTranslateX = useRef(new Animated.Value(0)).current;
+  const [isGestureActive, setIsGestureActive] = useState(false);
+  const [gestureProgress, setGestureProgress] = useState(0);
+
+  // Reset main content position when menu closes
+  const handleMenuClose = useCallback(() => {
+    setShowMenu(false);
+    // Reset main content to original position
+    Animated.spring(mainContentTranslateX, {
+      toValue: 0,
+      useNativeDriver: true,
+      tension: 120,
+      friction: 9,
+    }).start();
+  }, [mainContentTranslateX]);
+
+  // Handle menu button press with same animation
+  const handleMenuButtonPress = useCallback(() => {
+    setShowMenu(true);
+    // Animate main content out with same spring animation as gesture
+    Animated.spring(mainContentTranslateX, {
+      toValue: 300,
+      useNativeDriver: true,
+      tension: 120,
+      friction: 9,
+    }).start();
+  }, [mainContentTranslateX]);
+
+  // Handle clear chat with confirmation
+  const handleClearChat = useCallback(() => {
+    Alert.alert(
+      "Clear Chat",
+      "Are you sure you want to clear the chat? This will remove all messages from the current conversation.",
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: clearMessages,
+        },
+      ]
+    );
+  }, [clearMessages]);
+
+  const panGesture = Gesture.Pan()
+    .activeOffsetX([20, -5]) // Only activate on right swipes (positive X), ignore small left movements
+    .failOffsetY([-30, 30]) // More restrictive Y threshold to avoid interfering with scroll
+    .onStart(() => {
+      setIsGestureActive(true);
+      setShowMenu(true);
+    })
+    .onUpdate((event) => {
+      // Only allow rightward movement (positive translationX)
+      const clampedTranslation = Math.max(0, event.translationX);
+      mainContentTranslateX.setValue(clampedTranslation);
+
+      // Calculate gesture progress for menu sliding
+      const progress = Math.min(clampedTranslation / 300, 1); // 0 to 1
+      setGestureProgress(progress);
+    })
+    .onEnd((event) => {
+      setIsGestureActive(false);
+      setGestureProgress(0);
+
+      // If swiped right with sufficient distance or velocity, open menu
+      if (event.translationX > 50 || event.velocityX > 500) {
+        setShowMenu(true);
+
+        // Animate main content fully out
+        Animated.spring(mainContentTranslateX, {
+          toValue: 300,
+          useNativeDriver: true,
+          tension: 120,
+          friction: 9,
+        }).start();
+      } else {
+        // Reset position with spring animation
+        Animated.spring(mainContentTranslateX, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 120,
+          friction: 9,
+        }).start();
+      }
+    });
+
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={colors.background} />
-      <SafeAreaView style={styles.safeArea}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={styles.flex}
+      <GestureDetector gesture={panGesture}>
+        <Animated.View
+          style={[
+            styles.gestureContainer,
+            { transform: [{ translateX: mainContentTranslateX }] },
+          ]}
         >
-          <ChatHeader
-            onHistoryPress={() => setShowMenu(true)}
-            onClearPress={clearMessages}
-            hasContent={messages.length > 0}
-          />
-
-          <View style={styles.messageContainer}>
-            {/* Background Logo */}
-            <View style={styles.backgroundLogoContainer}>
-              <Image
-                source={require("./assets/logo.png")}
-                style={[
-                  styles.backgroundLogo,
-                  {
-                    tintColor: colors.textTertiary,
-                    opacity: themeMode === "light" ? 0.3 : 0.1,
-                  },
-                ]}
-                resizeMode="contain"
+          <SafeAreaView style={styles.safeArea}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              style={styles.flex}
+            >
+              <ChatHeader
+                onHistoryPress={handleMenuButtonPress}
+                onClearPress={handleClearChat}
+                hasContent={messages.length > 0}
               />
-            </View>
-            <FlatList
-              ref={listRef}
-              data={messageGroups}
-              renderItem={renderItem}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.listContent}
-              style={styles.messageList}
-              initialNumToRender={10}
-              maxToRenderPerBatch={10}
-              windowSize={10}
-              removeClippedSubviews={false}
-              scrollEnabled={true}
-              nestedScrollEnabled={true}
-              onContentSizeChange={() => {
-                requestAnimationFrame(() => {
-                  listRef.current?.scrollToEnd({ animated: false });
-                });
-              }}
-            />
-          </View>
 
-          <TypingIndicator isVisible={isTyping} />
+              <View style={styles.messageContainer}>
+                {/* Background Logo */}
+                <View style={styles.backgroundLogoContainer}>
+                  <Image
+                    source={require("./assets/logo.png")}
+                    style={[
+                      styles.backgroundLogo,
+                      {
+                        tintColor: colors.textTertiary,
+                        opacity: themeMode === "light" ? 0.3 : 0.1,
+                      },
+                    ]}
+                    resizeMode="contain"
+                  />
+                </View>
+                <FlatList
+                  ref={listRef}
+                  data={messageGroups}
+                  renderItem={renderItem}
+                  keyExtractor={(item) => item.id}
+                  contentContainerStyle={styles.listContent}
+                  style={styles.messageList}
+                  initialNumToRender={10}
+                  maxToRenderPerBatch={10}
+                  windowSize={10}
+                  removeClippedSubviews={false}
+                  scrollEnabled={true}
+                  nestedScrollEnabled={true}
+                  onContentSizeChange={() => {
+                    requestAnimationFrame(() => {
+                      listRef.current?.scrollToEnd({ animated: false });
+                    });
+                  }}
+                />
+              </View>
 
-          <MessageInput
-            type={type}
-            content={content}
-            onTypeChange={setType}
-            onContentChange={setContent}
-            onSend={handleSend}
-          />
-        </KeyboardAvoidingView>
-      </SafeAreaView>
+              <TypingIndicator isVisible={isTyping} />
+
+              <MessageInput
+                type={type}
+                content={content}
+                onTypeChange={setType}
+                onContentChange={setContent}
+                onSend={handleSend}
+              />
+            </KeyboardAvoidingView>
+          </SafeAreaView>
+        </Animated.View>
+      </GestureDetector>
 
       <MenuModal
         visible={showMenu}
-        onClose={() => setShowMenu(false)}
+        onClose={handleMenuClose}
         session={session}
+        gestureProgress={isGestureActive ? gestureProgress : 1}
+        menuState={menuState}
       />
 
       {isSplashVisible && (
@@ -242,6 +351,9 @@ const createStyles = (colors: any) =>
     root: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    gestureContainer: {
+      flex: 1,
     },
     authWrapper: {
       justifyContent: "center",
@@ -403,9 +515,13 @@ const App: React.FC = () => {
   }
 
   return (
-    <ThemeProvider>
-      <ChatScreen session={session} />
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <ThemeProvider>
+          <ChatScreen session={session} />
+        </ThemeProvider>
+      </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 };
 

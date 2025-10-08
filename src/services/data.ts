@@ -167,6 +167,20 @@ export async function deleteAllJournalEntries(): Promise<void> {
   }
 }
 
+export async function deleteAllEntriesByType(type: EntryType): Promise<void> {
+  const user = await requireUser()
+
+  const { error } = await supabase
+    .from('entries')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('type', type)
+
+  if (error) {
+    throw error
+  }
+}
+
 export async function getJournalEntryById(
   id: string
 ): Promise<RemoteJournalEntry | null> {

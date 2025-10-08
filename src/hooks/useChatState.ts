@@ -8,7 +8,6 @@ import type {
 import {
   appendMessage,
   createJournalEntry,
-  deleteAllJournalEntries,
   listJournals,
   type EntryType,
 } from "../services/data";
@@ -19,7 +18,7 @@ const successMessages: Record<EntryType, string> = {
   schedule: "Saved. Your time is your power, use it wisely.",
 };
 
-export const useChatState = () => {
+export const useChatState = (onEntryCreated?: () => void) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -33,8 +32,7 @@ export const useChatState = () => {
         .slice()
         .sort(
           (a, b) =>
-            new Date(a.created_at).getTime() -
-            new Date(b.created_at).getTime()
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         )
         .forEach((entry) => {
           if (!entry.id) {
@@ -138,6 +136,12 @@ export const useChatState = () => {
 
       if (saved?.id) {
         const entryId = saved.id;
+
+        // Notify that an entry was created to refresh counters
+        if (onEntryCreated) {
+          onEntryCreated();
+        }
+
         setIsTyping(true);
 
         if (timeoutRef.current) {
@@ -206,13 +210,9 @@ export const useChatState = () => {
     [messages, sendMessage]
   );
 
-  const clearMessages = useCallback(async () => {
-    try {
-      await deleteAllJournalEntries();
-      setMessages([]);
-    } catch (error) {
-      console.error("Error clearing messages:", error);
-    }
+  const clearMessages = useCallback(() => {
+    // Only clear the visual chat messages, do NOT delete saved entries
+    setMessages([]);
   }, []);
 
   return {

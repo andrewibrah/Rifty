@@ -1,338 +1,287 @@
-import React, {
-  useCallback,
-  useEffect,
-  useState,
-  useRef,
-  useMemo,
-} from "react";
+import React, { useState, useCallback, useRef, useMemo } from "react";
 import {
-  Animated,
-  Modal,
-  Pressable,
-  SafeAreaView,
-  StyleSheet,
+  View,
   Text,
   TouchableOpacity,
-  View,
+  Modal,
+  Animated,
+  Pressable,
+  StyleSheet,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import {
-  getJournalEntryById,
-  listJournals,
-  listMessages,
-  type EntryType,
-  type RemoteJournalEntry,
-  type RemoteMessage,
-} from "../services/data";
-import { supabase } from "../lib/supabase";
-import type { Annotation, AnnotationChannel } from "../types/annotations";
-import { getColors, radii, spacing, typography } from "../theme";
-import { useTheme } from "../contexts/ThemeContext";
-import SettingsModal from "./SettingsModal";
-import MenuCategories from "./menu/MenuCategories";
-import MenuEntries from "./menu/MenuEntries";
-import MenuEntryChat from "./menu/MenuEntryChat";
 import type { Session } from "@supabase/supabase-js";
+import { Alert } from "react-native";
+import { supabase } from "../lib/supabase";
+import { useMenuState } from "../hooks/useMenuState";
+import { useEntryChat } from "../hooks/useEntryChat";
+import MenuList from "./MenuList";
+import MenuEntryChat from "./menu/MenuEntryChat";
+import SettingsModal from "./SettingsModal";
+import { getColors, spacing, typography, radii } from "../theme";
+import { useTheme } from "../contexts/ThemeContext";
 
 interface MenuModalProps {
   visible: boolean;
   onClose: () => void;
   session: Session;
+  gestureProgress?: number;
+  menuState?: ReturnType<typeof useMenuState>;
 }
 
-type ViewMode = "categories" | "entries" | "entryChat";
-
-const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
+const ENTRY_TYPE_LABELS: Record<string, string> = {
   goal: "Goals",
   journal: "Journals",
   schedule: "Schedules",
 };
 
-const MenuModal: React.FC<MenuModalProps> = ({ visible, onClose, session }) => {
+const MenuModal: React.FC<MenuModalProps> = ({
+  visible,
+  onClose,
+  session,
+  gestureProgress = 1,
+  menuState: passedMenuState,
+}) => {
   const { themeMode } = useTheme();
   const colors = getColors(themeMode);
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [mode, setMode] = useState<ViewMode>("categories");
-  const [selectedType, setSelectedType] = useState<EntryType | null>(null);
-  const [entries, setEntries] = useState<RemoteJournalEntry[]>([]);
-  const [entriesLoading, setEntriesLoading] = useState(false);
-  const [entriesError, setEntriesError] = useState<string | null>(null);
+
   const [showSettings, setShowSettings] = useState(false);
-  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [currentChatMode, setCurrentChatMode] = useState<"note" | "ai">("note");
+  const [showContent, setShowContent] = useState(false);
   const slideAnim = useRef(new Animated.Value(-300)).current;
 
-  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
-  const [selectedEntry, setSelectedEntry] = useState<RemoteJournalEntry | null>(
-    null
-  );
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
-  const [annotationsLoading, setAnnotationsLoading] = useState(false);
-  const [annotationsError, setAnnotationsError] = useState<string | null>(null);
-  const [annotationCounts, setAnnotationCounts] = useState<
-    Record<string, number>
-  >({});
+  // Use passed menu state or create new one
+  const menuState = passedMenuState || useMenuState();
+  const entryChat = useEntryChat(menuState.selectedEntryId, visible);
 
-  useEffect(() => {
+  // Handle modal animation
+  React.useEffect(() => {
     if (visible) {
-      // Show modal and reset to start position immediately, then animate in
-      setIsModalVisible(true);
-      slideAnim.setValue(-300);
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 65,
-        friction: 11,
-      }).start();
-    } else if (isModalVisible) {
-      // Animate out first, then hide modal
-      Animated.timing(slideAnim, {
-        toValue: -300,
-        duration: 200,
-        useNativeDriver: true,
-      }).start(() => {
-        // Hide modal and reset state after animation completes
-        setIsModalVisible(false);
-        setMode("categories");
-        setSelectedType(null);
-        setEntries([]);
-        setEntriesError(null);
-        setSelectedEntryId(null);
-        setSelectedEntry(null);
-        setAnnotations([]);
-        setAnnotationsError(null);
-        setShowSettings(false);
-      });
-    }
-  }, [visible, slideAnim, isModalVisible]);
+      // Use gesture progress for smooth sliding
+      const targetValue = -300 + gestureProgress * 300;
+      slideAnim.setValue(targetValue);
 
-  useEffect(() => {
-    let isCancelled = false;
-
-    if (!visible || !selectedType) {
-      return () => {
-        isCancelled = true;
-      };
-    }
-
-    const loadEntries = async () => {
-      setEntriesLoading(true);
-      setEntriesError(null);
-      try {
-        const items = await listJournals({ type: selectedType, limit: 100 });
-        if (!isCancelled) {
-          setEntries(items);
-
-          // Stop-gap parallelization: count messages per entry via head count
-          const results = await Promise.all(
-            items.map((item) =>
-              item.id
-                ? Promise.resolve(
-                    supabase
-                      .from("messages")
-                      .select("id", { head: true, count: "exact" })
-                      .eq("conversation_id", item.id)
-                  )
-                    .then(({ count }) => count ?? 0)
-                    .catch(() => 0)
-                : Promise.resolve(0)
-            )
-          );
-
-          const counts: Record<string, number> = {};
-          items.forEach((item, idx) => {
-            if (item.id) counts[item.id] = results[idx] ?? 0;
-          });
-
-          setAnnotationCounts(counts);
-        }
-      } catch (error) {
-        console.error("Error loading entries", error);
-        if (!isCancelled) {
-          setEntriesError("Unable to load entries right now.");
-        }
-      } finally {
-        if (!isCancelled) {
-          setEntriesLoading(false);
-        }
+      // Show content when menu is 70% slid in to prevent flickering
+      // Or immediately if opened via button (gestureProgress = 1)
+      if (gestureProgress >= 0.7 || gestureProgress === 1) {
+        setShowContent(true);
+      } else {
+        setShowContent(false);
       }
-    };
 
-    loadEntries();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [selectedType, visible]);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    if (!visible || selectedEntryId == null) {
-      return () => {
-        isCancelled = true;
-      };
-    }
-
-    const loadEntryDetail = async () => {
-      setAnnotationsLoading(true);
-      setAnnotationsError(null);
-      try {
-        const [entry, messages] = await Promise.all([
-          getJournalEntryById(selectedEntryId),
-          listMessages(selectedEntryId, { limit: 200 }),
-        ]);
-
-        if (!isCancelled) {
-          setSelectedEntry(entry);
-          setAnnotations(
-            messages.map(mapMessageToAnnotation).filter(isNotNull)
-          );
-        }
-      } catch (error) {
-        console.error("Error loading entry detail", error);
-        if (!isCancelled) {
-          setAnnotationsError("Unable to load entry conversation.");
-        }
-      } finally {
-        if (!isCancelled) {
-          setAnnotationsLoading(false);
-        }
+      if (gestureProgress === 1) {
+        // Only animate to final position when gesture is complete
+        Animated.spring(slideAnim, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 65,
+          friction: 11,
+        }).start();
       }
-    };
+    } else {
+      // Hide content and reset state when modal closes
+      setShowContent(false);
+      menuState.handleBack();
+    }
+  }, [visible, slideAnim, gestureProgress, menuState]);
 
-    loadEntryDetail();
+  const handleAnnotationCountUpdate = useCallback(
+    (entryId: string, delta: number) => {
+      menuState.setAnnotationCounts((prev) => ({
+        ...prev,
+        [entryId]: (prev[entryId] || 0) + delta,
+      }));
+    },
+    [menuState]
+  );
 
-    return () => {
-      isCancelled = true;
-    };
-  }, [selectedEntryId, visible]);
-
-  const handleSelectType = useCallback((type: EntryType) => {
-    setSelectedType(type);
-    setMode("entries");
+  const handleModeChange = useCallback((mode: "note" | "ai") => {
+    setCurrentChatMode(mode);
   }, []);
 
-  const handleSelectEntry = useCallback((entryId: string) => {
-    setSelectedEntryId(entryId);
-    setMode("entryChat");
-  }, []);
+  const handleClearAIChat = useCallback(() => {
+    if (!entryChat.selectedEntry) return;
 
-  const showCategories = mode === "categories";
-  const showEntries = mode === "entries";
-  const showEntryChat = mode === "entryChat";
+    Alert.alert(
+      "Clear AI Chat",
+      "Are you sure you want to clear the AI conversation? This will permanently delete all AI messages from storage and cannot be undone.",
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // Delete all AI messages from Supabase
+              const { error } = await supabase
+                .from("messages")
+                .delete()
+                .eq("conversation_id", entryChat.selectedEntry!.id)
+                .eq("metadata->>channel", "ai");
 
-  const handleBack = useCallback(() => {
-    if (showEntryChat) {
-      setMode("entries");
-      setSelectedEntryId(null);
-      setSelectedEntry(null);
-      setAnnotations([]);
-      setAnnotationsError(null);
-      return;
-    }
+              if (error) {
+                throw error;
+              }
 
-    if (showEntries) {
-      setMode("categories");
-      setSelectedType(null);
-      setEntries([]);
-      setEntriesError(null);
-    }
-  }, [showEntries, showEntryChat]);
+              // Refresh annotations from Supabase to get the updated state
+              entryChat.refreshAnnotations();
+            } catch (error) {
+              console.error("Error clearing AI chat", error);
+              entryChat.onErrorUpdate("Unable to clear AI chat right now.");
+            }
+          },
+        },
+      ]
+    );
+  }, [entryChat]);
+
+  const showCategories = menuState.mode === "categories";
+  const showEntries = menuState.mode === "entries";
+  const showEntryChat = menuState.mode === "entryChat";
 
   return (
     <Modal
-      visible={isModalVisible}
+      visible={visible}
       animationType="none"
       transparent
       onRequestClose={onClose}
     >
-      <Pressable style={styles.overlay} onPress={onClose} accessible={false}>
-        <Animated.View
-          style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}
-        >
-          <Pressable
-            style={styles.sidebarPressable}
-            onPress={(e) => e.stopPropagation()}
-            accessible={false}
-          >
-            <SafeAreaView style={styles.sidebarContent}>
-              <View style={styles.modalHeader}>
-                {!showCategories ? (
-                  <TouchableOpacity
-                    onPress={handleBack}
-                    style={styles.backButton}
-                  >
-                    <Ionicons
-                      name="arrow-back"
-                      size={20}
-                      color={colors.textPrimary}
-                    />
-                  </TouchableOpacity>
-                ) : (
-                  <View style={styles.headerSpacer} />
-                )}
-                <Text style={styles.modalTitle}>
-                  {showCategories && "Menu"}
-                  {showEntries && selectedType
-                    ? `${ENTRY_TYPE_LABELS[selectedType]}`
-                    : null}
-                  {showEntryChat && selectedEntry ? "Conversation" : null}
-                </Text>
+      {showEntryChat ? (
+        // Full screen entry chat
+        <View style={styles.fullScreenContainer}>
+          <SafeAreaView style={styles.fullScreenContent}>
+            <View style={styles.fullScreenHeader}>
+              <TouchableOpacity
+                onPress={menuState.handleBack}
+                style={styles.backButton}
+              >
+                <Ionicons
+                  name="arrow-back"
+                  size={20}
+                  color={colors.textPrimary}
+                />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>
+                {entryChat.selectedEntry
+                  ? currentChatMode === "note"
+                    ? "Notes"
+                    : "AI Chat"
+                  : null}
+              </Text>
+              {entryChat.selectedEntry &&
+              currentChatMode === "ai" &&
+              entryChat.annotations.filter((a) => a.channel === "ai").length >
+                0 ? (
+                <TouchableOpacity
+                  onPress={handleClearAIChat}
+                  style={styles.clearButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear AI chat"
+                >
+                  <Ionicons
+                    name="create-outline"
+                    size={20}
+                    color={colors.textSecondary}
+                  />
+                </TouchableOpacity>
+              ) : (
                 <View style={styles.headerSpacer} />
-              </View>
-
-              {showCategories && (
-                <MenuCategories onSelectType={handleSelectType} />
               )}
-
-              {showEntries && selectedType && (
-                <MenuEntries
-                  entries={entries}
-                  loading={entriesLoading}
-                  error={entriesError}
-                  annotationCounts={annotationCounts}
-                  selectedType={selectedType}
-                  onSelectEntry={handleSelectEntry}
-                  onEntriesUpdate={setEntries}
-                />
-              )}
-
-              {showEntryChat && selectedEntry && (
-                <MenuEntryChat
-                  entry={selectedEntry}
-                  annotations={annotations}
-                  loading={annotationsLoading}
-                  error={annotationsError}
-                  onAnnotationsUpdate={setAnnotations}
-                  onAnnotationCountUpdate={(entryId, delta) =>
-                    setAnnotationCounts((prev) => ({
-                      ...prev,
-                      [entryId]: (prev[entryId] || 0) + delta,
-                    }))
-                  }
-                  onErrorUpdate={setAnnotationsError}
-                />
-              )}
-
-              {/* Footer with Settings Button */}
-              {showCategories && (
-                <View style={styles.footer}>
-                  <TouchableOpacity
-                    style={styles.footerSettingsButton}
-                    onPress={() => setShowSettings(true)}
-                  >
-                    <Ionicons
-                      name="settings-outline"
-                      size={20}
-                      color={colors.textSecondary}
-                    />
-                  </TouchableOpacity>
+            </View>
+            {entryChat.selectedEntry && (
+              <MenuEntryChat
+                entry={entryChat.selectedEntry}
+                annotations={entryChat.annotations}
+                loading={entryChat.annotationsLoading}
+                error={entryChat.annotationsError}
+                onAnnotationsUpdate={entryChat.setAnnotations}
+                onAnnotationCountUpdate={handleAnnotationCountUpdate}
+                onErrorUpdate={entryChat.onErrorUpdate}
+                onModeChange={handleModeChange}
+                onRefreshAnnotations={entryChat.refreshAnnotations}
+                onClearAIChat={handleClearAIChat}
+              />
+            )}
+          </SafeAreaView>
+        </View>
+      ) : (
+        // Sidebar for categories and entries
+        <Pressable style={styles.overlay} onPress={onClose} accessible={false}>
+          <Animated.View
+            style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}
+          >
+            <Pressable
+              style={styles.sidebarPressable}
+              onPress={(e) => e.stopPropagation()}
+              accessible={false}
+            >
+              <SafeAreaView style={styles.sidebarContent}>
+                <View style={styles.modalHeader}>
+                  {!showCategories ? (
+                    <TouchableOpacity
+                      onPress={menuState.handleBack}
+                      style={styles.backButton}
+                    >
+                      <Ionicons
+                        name="arrow-back"
+                        size={20}
+                        color={colors.textPrimary}
+                      />
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.headerSpacer} />
+                  )}
+                  <Text style={styles.modalTitle}>
+                    {showEntries && menuState.selectedType
+                      ? `${ENTRY_TYPE_LABELS[menuState.selectedType]}`
+                      : null}
+                  </Text>
+                  <View style={styles.headerSpacer} />
                 </View>
-              )}
-            </SafeAreaView>
-          </Pressable>
-        </Animated.View>
-      </Pressable>
+
+                {showContent && (
+                  <MenuList
+                    mode={menuState.mode}
+                    selectedType={menuState.selectedType}
+                    entries={menuState.entries}
+                    entriesLoading={menuState.entriesLoading}
+                    entriesError={menuState.entriesError}
+                    annotationCounts={menuState.annotationCounts}
+                    entryCounts={menuState.entryCounts}
+                    onSelectType={menuState.handleSelectType}
+                    onSelectEntry={menuState.handleSelectEntry}
+                    onEntriesUpdate={(entries) => {
+                      // Update the entries in menu state
+                      // Entry counts will update automatically via useEffect
+                      (menuState as any).setEntries(entries);
+                    }}
+                  />
+                )}
+
+                {/* Footer with Settings Button */}
+                {showContent && showCategories && (
+                  <View style={styles.footer}>
+                    <TouchableOpacity
+                      style={styles.footerSettingsButton}
+                      onPress={() => setShowSettings(true)}
+                    >
+                      <Ionicons
+                        name="settings-outline"
+                        size={20}
+                        color={colors.textSecondary}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </SafeAreaView>
+            </Pressable>
+          </Animated.View>
+        </Pressable>
+      )}
 
       <SettingsModal
         visible={showSettings}
@@ -343,46 +292,29 @@ const MenuModal: React.FC<MenuModalProps> = ({ visible, onClose, session }) => {
   );
 };
 
-function mapMessageToAnnotation(message: RemoteMessage): Annotation | null {
-  const metadata = message.metadata ?? undefined;
-  const messageKind = metadata?.messageKind;
-
-  if (messageKind === "entry" || messageKind === "autoReply") {
-    return null;
-  }
-
-  const channel = metadata?.channel;
-  const annotationChannel: AnnotationChannel =
-    channel === "ai" || channel === "system" ? channel : "note";
-
-  const kind: Annotation["kind"] =
-    message.role === "assistant"
-      ? "bot"
-      : message.role === "system"
-        ? "system"
-        : "user";
-
-  return {
-    id: message.id,
-    entryId: message.conversation_id,
-    kind,
-    channel: annotationChannel,
-    content: message.content,
-    created_at: message.created_at,
-    metadata,
-  };
-}
-
-function isNotNull<T>(value: T | null): value is T {
-  return value !== null;
-}
-
 const createStyles = (colors: any) =>
   StyleSheet.create({
     overlay: {
       flex: 1,
       backgroundColor: "rgba(0,0,0,0.6)",
       flexDirection: "row",
+    },
+    fullScreenContainer: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    fullScreenContent: {
+      flex: 1,
+    },
+    fullScreenHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.lg,
+      paddingBottom: spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
     },
     sidebar: {
       width: 300,
@@ -429,18 +361,25 @@ const createStyles = (colors: any) =>
     headerSpacer: {
       width: 36,
     },
+    clearButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      minWidth: 36,
+      minHeight: 36,
+    },
     footer: {
       borderTopWidth: 1,
       borderTopColor: colors.borderLight,
-      paddingVertical: spacing.md,
+      paddingVertical: spacing.sm,
       paddingHorizontal: spacing.lg,
       flexDirection: "row",
       justifyContent: "flex-end",
       alignItems: "center",
     },
     footerSettingsButton: {
-      width: 40,
-      height: 40,
+      width: 36,
+      height: 36,
       justifyContent: "center",
       alignItems: "center",
     },
