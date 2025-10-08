@@ -153,7 +153,7 @@ const MenuModal: React.FC<MenuModalProps> = ({
       {showEntryChat ? (
         // Full screen entry chat
         <View style={styles.fullScreenContainer}>
-          <SafeAreaView style={styles.fullScreenContent}>
+          <SafeAreaView style={styles.fullScreenContent} edges={["top", "left", "right"]}>
             <View style={styles.fullScreenHeader}>
               <TouchableOpacity
                 onPress={menuState.handleBack}
@@ -219,7 +219,7 @@ const MenuModal: React.FC<MenuModalProps> = ({
               onPress={(e) => e.stopPropagation()}
               accessible={false}
             >
-              <SafeAreaView style={styles.sidebarContent}>
+              <SafeAreaView style={styles.sidebarContent} edges={["top", "left", "right"]}>
                 <View style={styles.modalHeader}>
                   {!showCategories ? (
                     <TouchableOpacity
@@ -310,11 +310,12 @@ const createStyles = (colors: any) =>
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
-      paddingHorizontal: spacing.lg,
+      paddingHorizontal: spacing.md,
       paddingTop: spacing.lg,
-      paddingBottom: spacing.md,
+      paddingBottom: spacing.lg,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
+      minHeight: 60,
     },
     sidebar: {
       width: 300,
@@ -337,9 +338,10 @@ const createStyles = (colors: any) =>
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
-      paddingHorizontal: spacing.lg,
+      paddingHorizontal: spacing.md,
       paddingTop: spacing.lg,
-      paddingBottom: spacing.md,
+      paddingBottom: spacing.lg,
+      minHeight: 60,
     },
     modalTitle: {
       fontFamily: typography.heading.fontFamily,
@@ -351,12 +353,13 @@ const createStyles = (colors: any) =>
       textAlign: "center",
     },
     backButton: {
-      width: 36,
-      height: 36,
+      width: 44,
+      height: 44,
       borderRadius: radii.sm,
       justifyContent: "center",
       alignItems: "center",
       backgroundColor: colors.surface,
+      marginRight: spacing.xs,
     },
     headerSpacer: {
       width: 36,
