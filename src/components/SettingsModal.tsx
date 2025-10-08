@@ -30,7 +30,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
-        <SafeAreaView style={styles.modalCard}>
+        <SafeAreaView style={styles.modalCard} edges={['top', 'left', 'right']}>
           <View style={styles.modalHeader}>
             <View style={styles.headerButtonPlaceholder} />
             <Text style={styles.modalTitle}>Settings</Text>
@@ -146,7 +146,8 @@ const createStyles = (colors: any) =>
       alignItems: "center",
       paddingHorizontal: spacing.md,
       paddingTop: spacing.lg,
-      paddingBottom: spacing.md,
+      paddingBottom: spacing.lg,
+      minHeight: 60,
     },
     modalTitle: {
       fontFamily: typography.heading.fontFamily,
@@ -158,8 +159,8 @@ const createStyles = (colors: any) =>
       textAlign: "center",
     },
     headerButton: {
-      width: 36,
-      height: 36,
+      width: 44,
+      height: 44,
       borderRadius: radii.sm,
       backgroundColor: colors.surface,
       justifyContent: "center",
