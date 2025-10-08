@@ -1,11 +1,5 @@
 import React, { useMemo } from "react";
-import {
-  Modal,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
@@ -38,8 +32,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       <View style={styles.overlay}>
         <SafeAreaView style={styles.modalCard}>
           <View style={styles.modalHeader}>
-            <View style={styles.headerButtonPlaceholder} />
-            <Text style={styles.modalTitle}>Settings</Text>
             <TouchableOpacity onPress={onClose} style={styles.headerButton}>
               <Ionicons
                 name="arrow-back-outline"
@@ -47,6 +39,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 color={colors.textPrimary}
               />
             </TouchableOpacity>
+            <Text style={styles.modalTitle}>Settings</Text>
+            <View style={styles.headerButtonPlaceholder} />
           </View>
 
           <View style={styles.content}>
