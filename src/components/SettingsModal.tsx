@@ -30,7 +30,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
-        <SafeAreaView style={styles.modalCard} edges={["top", "left", "right"]}>
+        <SafeAreaView style={styles.modalCard}>
           <View style={styles.modalHeader}>
             <View style={styles.headerButtonPlaceholder} />
             <Text style={styles.modalTitle}>Settings</Text>
