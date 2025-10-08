@@ -278,7 +278,7 @@ const createStyles = (colors: any) =>
     categoryButton: {
       flexDirection: "row",
       alignItems: "center",
-      paddingVertical: spacing.sm,
+      paddingVertical: spacing.md + spacing.xs,
       paddingHorizontal: spacing.sm,
       marginBottom: spacing.sm,
       backgroundColor: colors.surface,
@@ -293,7 +293,7 @@ const createStyles = (colors: any) =>
       backgroundColor: "rgba(99, 102, 241, 0.1)",
       justifyContent: "center",
       alignItems: "center",
-      marginRight: spacing.sm,
+      marginRight: spacing.xs,
     },
     categoryTextContainer: {
       flex: 1,
@@ -301,7 +301,7 @@ const createStyles = (colors: any) =>
     categoryButtonText: {
       fontFamily: typography.body.fontFamily,
       fontWeight: "600" as const,
-      fontSize: 15,
+      fontSize: 16,
       color: colors.textPrimary,
       letterSpacing: 0.3,
     },
@@ -309,7 +309,7 @@ const createStyles = (colors: any) =>
       fontFamily: typography.caption.fontFamily,
       fontWeight: typography.caption.fontWeight,
       letterSpacing: typography.caption.letterSpacing,
-      fontSize: 11,
+      fontSize: 12,
       color: colors.textSecondary,
       marginTop: 2,
     },
