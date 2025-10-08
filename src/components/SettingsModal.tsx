@@ -32,6 +32,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       <View style={styles.overlay}>
         <SafeAreaView style={styles.modalCard}>
           <View style={styles.modalHeader}>
+            <View style={styles.headerButtonPlaceholder} />
+            <Text style={styles.modalTitle}>Settings</Text>
             <TouchableOpacity onPress={onClose} style={styles.headerButton}>
               <Ionicons
                 name="arrow-back-outline"
@@ -39,8 +41,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 color={colors.textPrimary}
               />
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>Settings</Text>
-            <View style={styles.headerButtonPlaceholder} />
           </View>
 
           <View style={styles.content}>
@@ -144,7 +144,7 @@ const createStyles = (colors: any) =>
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
-      paddingHorizontal: spacing.lg,
+      paddingHorizontal: spacing.md,
       paddingTop: spacing.lg,
       paddingBottom: spacing.md,
     },
@@ -164,6 +164,7 @@ const createStyles = (colors: any) =>
       backgroundColor: colors.surface,
       justifyContent: "center",
       alignItems: "center",
+      marginRight: spacing.xs,
     },
     headerButtonPlaceholder: {
       width: 36,
