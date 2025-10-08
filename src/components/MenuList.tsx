@@ -152,7 +152,7 @@ const MenuList: React.FC<MenuListProps> = ({
           <View style={styles.categoryIconContainer}>
             <Ionicons
               name={getIconForType(type)}
-              size={22}
+              size={18}
               color={colors.accent}
             />
           </View>
@@ -278,8 +278,8 @@ const createStyles = (colors: any) =>
     categoryButton: {
       flexDirection: "row",
       alignItems: "center",
-      paddingVertical: spacing.md + spacing.xs,
-      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.sm,
       marginBottom: spacing.sm,
       backgroundColor: colors.surface,
       borderRadius: radii.md,
@@ -287,13 +287,13 @@ const createStyles = (colors: any) =>
       borderLeftColor: "transparent",
     },
     categoryIconContainer: {
-      width: 40,
-      height: 40,
+      width: 32,
+      height: 32,
       borderRadius: radii.sm,
       backgroundColor: "rgba(99, 102, 241, 0.1)",
       justifyContent: "center",
       alignItems: "center",
-      marginRight: spacing.md,
+      marginRight: spacing.sm,
     },
     categoryTextContainer: {
       flex: 1,
@@ -301,7 +301,7 @@ const createStyles = (colors: any) =>
     categoryButtonText: {
       fontFamily: typography.body.fontFamily,
       fontWeight: "600" as const,
-      fontSize: 16,
+      fontSize: 15,
       color: colors.textPrimary,
       letterSpacing: 0.3,
     },
@@ -309,7 +309,7 @@ const createStyles = (colors: any) =>
       fontFamily: typography.caption.fontFamily,
       fontWeight: typography.caption.fontWeight,
       letterSpacing: typography.caption.letterSpacing,
-      fontSize: 12,
+      fontSize: 11,
       color: colors.textSecondary,
       marginTop: 2,
     },
