@@ -153,7 +153,10 @@ const MenuModal: React.FC<MenuModalProps> = ({
       {showEntryChat ? (
         // Full screen entry chat
         <View style={styles.fullScreenContainer}>
-          <SafeAreaView style={styles.fullScreenContent} edges={["top", "left", "right"]}>
+          <SafeAreaView
+            style={styles.fullScreenContent}
+            edges={["top", "left", "right"]}
+          >
             <View style={styles.fullScreenHeader}>
               <TouchableOpacity
                 onPress={menuState.handleBack}
@@ -219,7 +222,10 @@ const MenuModal: React.FC<MenuModalProps> = ({
               onPress={(e) => e.stopPropagation()}
               accessible={false}
             >
-              <SafeAreaView style={styles.sidebarContent} edges={["top", "left", "right"]}>
+              <SafeAreaView
+                style={styles.sidebarContent}
+                edges={["top", "left", "right"]}
+              >
                 <View style={styles.modalHeader}>
                   {!showCategories ? (
                     <TouchableOpacity
