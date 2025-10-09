@@ -211,11 +211,20 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.progress}>{`Step ${step + 1}/${STEPS}`}</Text>
+        <View style={styles.progressContainer}>
+          <Text style={styles.progress}>{`Step ${step + 1} of ${STEPS}`}</Text>
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: `${((step + 1) / STEPS) * 100}%` }]} />
+          </View>
+        </View>
         <Text style={styles.title}>Get to know you</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView 
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         {stepContent()}
       </ScrollView>
 
@@ -255,31 +264,57 @@ const createStyles = (colors: any) =>
     },
     header: {
       paddingHorizontal: spacing.lg,
-      paddingTop: spacing.lg,
-      paddingBottom: spacing.sm,
-      alignItems: 'flex-start',
+      paddingTop: spacing.xl,
+      paddingBottom: spacing.lg,
+      backgroundColor: colors.background,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    progressContainer: {
+      marginBottom: spacing.md,
     },
     progress: {
       fontFamily: typography.caption.fontFamily,
       color: colors.textSecondary,
-      fontSize: 12,
-      marginBottom: spacing.xs,
+      fontSize: 13,
+      marginBottom: spacing.sm,
+      fontWeight: '500',
+    },
+    progressBar: {
+      height: 4,
+      backgroundColor: colors.surface,
+      borderRadius: 2,
+      overflow: 'hidden',
+    },
+    progressFill: {
+      height: '100%',
+      backgroundColor: colors.accent,
+      borderRadius: 2,
     },
     title: {
       fontFamily: typography.heading.fontFamily,
-      fontSize: 24,
+      fontSize: 28,
       color: colors.textPrimary,
       fontWeight: '700',
+      letterSpacing: -0.5,
     },
     content: {
+      flex: 1,
       paddingHorizontal: spacing.lg,
-      paddingBottom: spacing.lg,
+      paddingTop: spacing.lg,
+      paddingBottom: spacing.xl,
     },
     footer: {
-      padding: spacing.lg,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.lg,
       borderTopWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.surface,
+      shadowColor: colors.textPrimary,
+      shadowOffset: { width: 0, height: -2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 8,
     },
     footerRow: {
       flexDirection: 'row',
@@ -289,8 +324,10 @@ const createStyles = (colors: any) =>
     primaryButton: {
       backgroundColor: colors.accent,
       borderRadius: radii.md,
-      paddingVertical: spacing.md,
+      paddingVertical: spacing.md + spacing.xs,
       alignItems: 'center',
+      minHeight: 48,
+      justifyContent: 'center',
     },
     primaryText: {
       color: '#fff',
@@ -302,16 +339,18 @@ const createStyles = (colors: any) =>
       flex: 1,
       marginRight: spacing.sm,
       borderRadius: radii.md,
-      paddingVertical: spacing.sm,
+      paddingVertical: spacing.md,
       borderWidth: 1,
       borderColor: colors.border,
       alignItems: 'center',
       justifyContent: 'center',
+      minHeight: 48,
     },
     secondaryText: {
       fontFamily: typography.button.fontFamily,
       color: colors.textSecondary,
-      fontSize: 14,
+      fontSize: 15,
+      fontWeight: '500',
     },
     disabledButton: {
       opacity: 0.5,
