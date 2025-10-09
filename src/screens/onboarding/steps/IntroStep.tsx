@@ -27,9 +27,9 @@ const IntroStep: React.FC<IntroStepProps> = ({
 
   return (
     <View>
-      <Text style={styles.heading}>Personalize Reflectify</Text>
+      <Text style={styles.heading}>Personalize Riflett</Text>
       <Text style={styles.body}>
-        Choose how much context you want Reflectify to remember. We collect only the
+        Choose how much context you want Riflett to remember. We collect only the
         signals you approve so reflections stay helpful, private, and adaptive.
       </Text>
 
@@ -69,21 +69,26 @@ const IntroStep: React.FC<IntroStepProps> = ({
         <Switch value={localCacheEnabled} onValueChange={onCacheToggle} />
       </View>
 
-      <TouchableOpacity
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: consentAccepted }}
-        onPress={() => onConsentChange(!consentAccepted)}
-        style={styles.consentCard}
-      >
-        <Text style={styles.consentTitle}>Consent & transparency</Text>
-        <Text style={styles.consentBody}>
-          We store settings in Supabase (encrypted at rest) and locally if enabled. No
-          biometric, financial, or health diagnoses collected.
+      <View style={styles.consentCard}>
+        <View style={styles.consentHeader}>
+          <View style={styles.consentText}>
+            <Text style={styles.consentTitle}>Consent & transparency</Text>
+            <Text style={styles.consentBody}>
+              We store settings in Supabase (encrypted at rest) and locally if enabled. No
+              biometric, financial, or health diagnoses collected.
+            </Text>
+          </View>
+          <Switch
+            value={consentAccepted}
+            onValueChange={onConsentChange}
+            trackColor={{ false: colors.surfaceElevated, true: colors.accent }}
+            thumbColor={consentAccepted ? '#fff' : colors.textTertiary}
+          />
+        </View>
+        <Text style={[styles.consentStatus, consentAccepted && styles.consentStatusActive]}>
+          {consentAccepted ? '✓ Consent granted. You can revoke in settings.' : 'Tap toggle to confirm you understand.'}
         </Text>
-        <Text style={styles.consentBody}>
-          {consentAccepted ? 'Consent granted. You can revoke in settings.' : 'Tap to confirm you understand.'}
-        </Text>
-      </TouchableOpacity>
+      </View>
     </View>
   )
 }
@@ -165,17 +170,37 @@ const createStyles = (colors: any) =>
       borderWidth: 1,
       borderColor: colors.border,
     },
+    consentHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      marginBottom: spacing.sm,
+    },
+    consentText: {
+      flex: 1,
+      marginRight: spacing.md,
+    },
     consentTitle: {
       fontFamily: typography.title.fontFamily,
       fontSize: 16,
       color: colors.textPrimary,
       marginBottom: spacing.xs,
+      fontWeight: '600',
     },
     consentBody: {
       fontFamily: typography.caption.fontFamily,
       color: colors.textSecondary,
       fontSize: 13,
       lineHeight: 18,
+    },
+    consentStatus: {
+      fontFamily: typography.caption.fontFamily,
+      color: colors.textTertiary,
+      fontSize: 12,
+      fontStyle: 'italic',
+    },
+    consentStatusActive: {
+      color: colors.accent,
+      fontWeight: '600',
     },
   })
 
