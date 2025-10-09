@@ -23,6 +23,11 @@ export type RemoteJournalEntry = {
   content: string
   metadata: Nullable<Record<string, any>>
   created_at: string
+  updated_at?: string
+  ai_intent?: Nullable<string>
+  ai_confidence?: Nullable<number>
+  ai_meta?: Nullable<Record<string, any>>
+  source?: Nullable<string>
 }
 
 export async function listMessages(

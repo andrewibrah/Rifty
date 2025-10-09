@@ -5,5 +5,8 @@
     "skipLibCheck": true,
     "noEmit": true,
     "esModuleInterop": true
-  }
+  },
+  "exclude": [
+    "supabase/functions"
+  ]
 }

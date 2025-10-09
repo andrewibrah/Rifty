@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -6,25 +6,26 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  PanResponder,
+  type PanResponderGestureState,
   Platform,
   StatusBar,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView, SafeAreaProvider } from "react-native-safe-area-context";
-import {
-  GestureHandlerRootView,
-  Gesture,
-  GestureDetector,
-} from "react-native-gesture-handler";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import type { Session } from "@supabase/supabase-js";
-import { type EntryType } from "./src/services/data";
 import ChatHeader from "./src/components/ChatHeader";
 import MessageBubble from "./src/components/MessageBubble";
 import TypingIndicator from "./src/components/TypingIndicator";
 import MessageInput from "./src/components/MessageInput";
 import MenuModal from "./src/components/MenuModal";
+import ScheduleCalendarModal from "./src/components/ScheduleCalendarModal";
+import OnboardingFlow from "./src/screens/onboarding/OnboardingFlow";
+import PersonalizationSettingsScreen from "./src/screens/settings/PersonalizationSettingsScreen";
 import Auth from "./src/components/Auth";
 import { useChatState } from "./src/hooks/useChatState";
 import { useMenuState } from "./src/hooks/useMenuState";
@@ -35,6 +36,9 @@ import { supabase } from "./src/lib/supabase";
 import purgeLocal from "./src/utils/purgeLocal";
 import Constants from "expo-constants";
 import { ThemeProvider } from "./src/contexts/ThemeContext";
+import { usePersonalization } from "./src/hooks/usePersonalization";
+import type { PersonalizationBundle, PersonalizationState, PersonaTag } from "./src/types/personalization";
+import { useEventLog } from "./src/hooks/useEventLog";
 
 const SPLASH_DURATION = 2500;
 const MIGRATION_FLAG =
@@ -47,9 +51,17 @@ const MIGRATION_FLAG =
 
 interface ChatScreenProps {
   session: Session;
+  personalization: PersonalizationBundle | null;
+  onSavePersonalization: (state: PersonalizationState, timezone: string) => Promise<PersonaTag>;
+  onRefreshPersonalization: () => Promise<void>;
 }
 
-const ChatScreen: React.FC<ChatScreenProps> = ({ session }) => {
+const ChatScreen: React.FC<ChatScreenProps> = ({
+  session,
+  personalization,
+  onSavePersonalization,
+  onRefreshPersonalization,
+}) => {
   const { themeMode } = useTheme();
   const colors = getColors(themeMode);
   const styles = createStyles(colors);
@@ -66,10 +78,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ session }) => {
     clearMessages,
   } = useChatState(menuState.refreshAllEntryCounts);
 
-  const [type, setType] = useState<EntryType>("journal");
   const [content, setContent] = useState("");
   const [showMenu, setShowMenu] = useState(false);
   const [isSplashVisible, setIsSplashVisible] = useState(true);
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [showPersonalization, setShowPersonalization] = useState(false);
 
   const splashOpacity = useRef(new Animated.Value(1)).current;
   const flameTranslate = useRef(new Animated.Value(0)).current;
@@ -126,7 +139,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ session }) => {
 
   const handleSend = async () => {
     if (!content.trim()) return;
-    await sendMessage(content, type);
+    await sendMessage(content);
     setContent("");
 
     requestAnimationFrame(() => {
@@ -164,30 +177,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ session }) => {
   const [isGestureActive, setIsGestureActive] = useState(false);
   const [gestureProgress, setGestureProgress] = useState(0);
 
-  // Reset main content position when menu closes
-  const handleMenuClose = useCallback(() => {
-    setShowMenu(false);
-    // Reset main content to original position
-    Animated.spring(mainContentTranslateX, {
-      toValue: 0,
-      useNativeDriver: true,
-      tension: 120,
-      friction: 9,
-    }).start();
-  }, [mainContentTranslateX]);
-
-  // Handle menu button press with same animation
-  const handleMenuButtonPress = useCallback(() => {
-    setShowMenu(true);
-    // Animate main content out with same spring animation as gesture
-    Animated.spring(mainContentTranslateX, {
-      toValue: 300,
-      useNativeDriver: true,
-      tension: 120,
-      friction: 9,
-    }).start();
-  }, [mainContentTranslateX]);
-
   // Handle clear chat with confirmation
   const handleClearChat = useCallback(() => {
     Alert.alert(
@@ -207,58 +196,113 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ session }) => {
     );
   }, [clearMessages]);
 
-  const panGesture = Gesture.Pan()
-    .activeOffsetX([20, -5]) // Only activate on right swipes (positive X), ignore small left movements
-    .failOffsetY([-30, 30]) // More restrictive Y threshold to avoid interfering with scroll
-    .onStart(() => {
-      setIsGestureActive(true);
-      setShowMenu(true);
-    })
-    .onUpdate((event) => {
-      // Only allow rightward movement (positive translationX)
-      const clampedTranslation = Math.max(0, event.translationX);
-      mainContentTranslateX.setValue(clampedTranslation);
+  const animateMainContent = useCallback(
+    (toValue: number) => {
+      Animated.spring(mainContentTranslateX, {
+        toValue,
+        useNativeDriver: true,
+        tension: 120,
+        friction: 9,
+      }).start();
+    },
+    [mainContentTranslateX]
+  );
 
-      // Calculate gesture progress for menu sliding
-      const progress = Math.min(clampedTranslation / 300, 1); // 0 to 1
-      setGestureProgress(progress);
-    })
-    .onEnd((event) => {
+  // Reset main content position when menu closes
+  const handleMenuClose = useCallback(() => {
+    setShowMenu(false);
+    setIsGestureActive(false);
+    setGestureProgress(0);
+    animateMainContent(0);
+  }, [animateMainContent]);
+
+  // Handle menu button press with same animation
+  const handleMenuButtonPress = useCallback(() => {
+    setShowMenu(true);
+    animateMainContent(300);
+  }, [animateMainContent]);
+
+  const finalizePanGesture = useCallback(
+    (gestureState: PanResponderGestureState) => {
       setIsGestureActive(false);
       setGestureProgress(0);
 
-      // If swiped right with sufficient distance or velocity, open menu
-      if (event.translationX > 50 || event.velocityX > 500) {
-        setShowMenu(true);
+      const translationX = Math.max(0, Math.min(gestureState.dx, 300));
+      const velocityX = gestureState.vx ?? 0;
+      const shouldOpen = translationX > 50 || velocityX > 0.5;
 
-        // Animate main content fully out
-        Animated.spring(mainContentTranslateX, {
-          toValue: 300,
-          useNativeDriver: true,
-          tension: 120,
-          friction: 9,
-        }).start();
+      if (shouldOpen) {
+        setShowMenu(true);
+        animateMainContent(300);
       } else {
-        // Reset position with spring animation
-        Animated.spring(mainContentTranslateX, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 120,
-          friction: 9,
-        }).start();
+        animateMainContent(0);
+        setShowMenu(false);
       }
+    },
+    [animateMainContent]
+  );
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_evt, gestureState) => {
+          const { dx, dy } = gestureState;
+          return dx > 20 && Math.abs(dy) < 30;
+        },
+        onPanResponderGrant: () => {
+          setIsGestureActive(true);
+          setShowMenu(true);
+        },
+        onPanResponderMove: (_evt, gestureState) => {
+          const clampedTranslation = Math.max(0, Math.min(gestureState.dx, 300));
+          mainContentTranslateX.setValue(clampedTranslation);
+
+          const progress = Math.min(Math.max(clampedTranslation / 300, 0), 1);
+          setGestureProgress(progress);
+        },
+        onPanResponderRelease: (_evt, gestureState) => {
+          finalizePanGesture(gestureState);
+        },
+        onPanResponderTerminate: (_evt, gestureState) => {
+          finalizePanGesture(gestureState);
+        },
+      }),
+    [finalizePanGesture, mainContentTranslateX]
+  );
+
+  const handleCalendarButtonPress = useCallback(() => {
+    setShowCalendar(true);
+  }, []);
+
+  const handleCalendarClose = useCallback(() => {
+    setShowCalendar(false);
+  }, []);
+
+  const handlePersonalizationPress = useCallback(() => {
+    if (!personalization) {
+      Alert.alert("Loading", "Personalization details are still syncing.");
+      return;
+    }
+    setShowPersonalization(true);
+  }, [personalization]);
+
+  const handlePersonalizationClose = useCallback(() => {
+    setShowPersonalization(false);
+    onRefreshPersonalization().catch((error) => {
+      console.error("Failed to refresh personalization", error);
     });
+  }, [onRefreshPersonalization]);
 
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={colors.background} />
-      <GestureDetector gesture={panGesture}>
-        <Animated.View
-          style={[
-            styles.gestureContainer,
-            { transform: [{ translateX: mainContentTranslateX }] },
-          ]}
-        >
+      <Animated.View
+        {...panResponder.panHandlers}
+        style={[
+          styles.gestureContainer,
+          { transform: [{ translateX: mainContentTranslateX }] },
+        ]}
+      >
           <SafeAreaView style={styles.safeArea}>
             <KeyboardAvoidingView
               behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -267,6 +311,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ session }) => {
               <ChatHeader
                 onHistoryPress={handleMenuButtonPress}
                 onClearPress={handleClearChat}
+                onCalendarPress={handleCalendarButtonPress}
+                onPersonalizationPress={handlePersonalizationPress}
                 hasContent={messages.length > 0}
               />
 
@@ -309,16 +355,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ session }) => {
               <TypingIndicator isVisible={isTyping} />
 
               <MessageInput
-                type={type}
                 content={content}
-                onTypeChange={setType}
                 onContentChange={setContent}
                 onSend={handleSend}
               />
             </KeyboardAvoidingView>
           </SafeAreaView>
         </Animated.View>
-      </GestureDetector>
 
       <MenuModal
         visible={showMenu}
@@ -327,6 +370,24 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ session }) => {
         gestureProgress={isGestureActive ? gestureProgress : 1}
         menuState={menuState}
       />
+
+      <ScheduleCalendarModal
+        visible={showCalendar}
+        onClose={handleCalendarClose}
+      />
+
+      {showPersonalization && personalization && (
+        <PersonalizationSettingsScreen
+          bundle={personalization}
+          onClose={handlePersonalizationClose}
+          onSave={async (state, timezone) => {
+            const persona = await onSavePersonalization(state, timezone)
+            await onRefreshPersonalization()
+            Alert.alert('Saved', `Persona updated to ${persona}.`)
+            return persona
+          }}
+        />
+      )}
 
       {isSplashVisible && (
         <Animated.View
@@ -445,6 +506,80 @@ const AuthScreen: React.FC = () => {
   );
 };
 
+const AuthenticatedApp: React.FC<{ session: Session }> = ({ session }) => {
+  const { replay } = useEventLog();
+  const { data, loading, error, refresh, save } = usePersonalization();
+  const [onboardingComplete, setOnboardingComplete] = useState(false);
+  const { themeMode } = useTheme();
+  const colors = getColors(themeMode);
+
+  useEffect(() => {
+    replay().catch((err) => console.warn('Failed to replay persona signals', err));
+  }, [replay]);
+
+  useEffect(() => {
+    if (data?.profile.onboarding_completed) {
+      setOnboardingComplete(true);
+    }
+  }, [data?.profile.onboarding_completed]);
+
+  const initialTimezone = data?.profile.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC';
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  if (error || !data) {
+    return (
+      <View
+        style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}
+      >
+        <Text style={{ color: colors.textSecondary, marginBottom: 16 }}>
+          Unable to load personalization.
+        </Text>
+        <TouchableOpacity
+          onPress={refresh}
+          style={{
+            paddingHorizontal: 24,
+            paddingVertical: 12,
+            borderRadius: 12,
+            backgroundColor: colors.accent,
+          }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '600' }}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (!onboardingComplete) {
+    return (
+      <OnboardingFlow
+        initialSettings={data.settings ?? undefined}
+        initialTimezone={initialTimezone}
+        onPersist={(state, timezone) => save(state, timezone, 'First-time onboarding', 'onboarding')}
+        onComplete={() => {
+          setOnboardingComplete(true);
+        }}
+      />
+    );
+  }
+
+  const handleSavePersonalization = async (state: PersonalizationState, timezone: string) => {
+    const persona = await save(state, timezone, 'Settings update', 'settings_update');
+    return persona;
+  };
+
+  return (
+    <ChatScreen
+      session={session}
+      personalization={data}
+      onSavePersonalization={handleSavePersonalization}
+      onRefreshPersonalization={refresh}
+    />
+  );
+};
+
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -518,7 +653,7 @@ const App: React.FC = () => {
     <SafeAreaProvider>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <ThemeProvider>
-          <ChatScreen session={session} />
+          <AuthenticatedApp session={session} />
         </ThemeProvider>
       </GestureHandlerRootView>
     </SafeAreaProvider>

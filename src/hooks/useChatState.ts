@@ -7,10 +7,10 @@ import type {
 } from "../types/chat";
 import {
   appendMessage,
-  createJournalEntry,
   listJournals,
   type EntryType,
 } from "../services/data";
+import { createEntryFromChat } from "../lib/entries";
 
 const successMessages: Record<EntryType, string> = {
   goal: "Saved. Keep up your hard work.",
@@ -47,6 +47,12 @@ export const useChatState = (onEntryCreated?: () => void) => {
             content: entry.content,
             created_at: createdAt,
             status: "sent",
+            aiIntent: entry.ai_intent ?? entry.type,
+            aiConfidence:
+              typeof entry.ai_confidence === "number"
+                ? entry.ai_confidence
+                : null,
+            aiMeta: entry.ai_meta ?? null,
           };
           chatMessages.push(entryMessage);
 
@@ -112,15 +118,16 @@ export const useChatState = (onEntryCreated?: () => void) => {
     return groups;
   }, []);
 
-  const sendMessage = useCallback(async (content: string, type: EntryType) => {
+  const sendMessage = useCallback(async (content: string) => {
     const trimmedContent = content.trim();
     if (!trimmedContent) return;
 
     const tempId = Date.now().toString();
+    const optimisticType: EntryType = "journal";
     const userMessage: EntryMessage = {
       id: tempId,
       kind: "entry",
-      type,
+      type: optimisticType,
       content: trimmedContent,
       created_at: new Date().toISOString(),
       status: "sending",
@@ -129,10 +136,12 @@ export const useChatState = (onEntryCreated?: () => void) => {
     setMessages((prevMessages) => [...prevMessages, userMessage]);
 
     try {
-      const saved = await createJournalEntry({
-        type,
-        content: trimmedContent,
-      });
+      const saved = await createEntryFromChat(trimmedContent);
+      const resolvedType = (saved.type ?? "journal") as EntryType;
+      const aiIntent = saved.ai_intent ?? resolvedType;
+      const aiConfidence =
+        typeof saved.ai_confidence === "number" ? saved.ai_confidence : null;
+      const aiMeta = saved.ai_meta ?? null;
 
       if (saved?.id) {
         const entryId = saved.id;
@@ -142,8 +151,6 @@ export const useChatState = (onEntryCreated?: () => void) => {
           onEntryCreated();
         }
 
-        setIsTyping(true);
-
         if (timeoutRef.current) {
           clearTimeout(timeoutRef.current);
         }
@@ -151,17 +158,33 @@ export const useChatState = (onEntryCreated?: () => void) => {
         setMessages((prevMessages) =>
           prevMessages.map((msg) =>
             msg.id === tempId
-              ? { ...msg, id: entryId, status: "sent" as const }
+              ? {
+                  ...msg,
+                  id: entryId,
+                  status: "sent" as const,
+                  type: resolvedType,
+                  aiIntent,
+                  aiConfidence,
+                  aiMeta,
+                }
               : msg
           )
         );
 
         appendMessage(entryId, "user", trimmedContent, {
           messageKind: "entry",
-          entryType: type,
+          entryType: resolvedType,
+          aiIntent,
+          aiConfidence,
+          aiMeta,
         }).catch((error) => {
           console.error("Unable to record entry message", error);
         });
+
+        setIsTyping(true);
+
+        const acknowledgement =
+          successMessages[resolvedType] ?? successMessages.journal;
 
         timeoutRef.current = setTimeout(() => {
           setIsTyping(false);
@@ -170,17 +193,20 @@ export const useChatState = (onEntryCreated?: () => void) => {
             id: `bot-${entryId}`,
             kind: "bot",
             afterId: entryId,
-            content: successMessages[type],
+            content: acknowledgement,
             created_at: new Date().toISOString(),
             status: "sent",
           };
 
           setMessages((prevMessages) => [...prevMessages, botMessage]);
 
-          appendMessage(entryId, "assistant", successMessages[type], {
+          appendMessage(entryId, "assistant", acknowledgement, {
             messageKind: "autoReply",
-            entryType: type,
+            entryType: resolvedType,
             afterId: entryId,
+            aiIntent,
+            aiConfidence,
+            aiMeta,
           }).catch((error) => {
             console.error("Unable to record auto-reply", error);
           });
@@ -194,7 +220,7 @@ export const useChatState = (onEntryCreated?: () => void) => {
       );
       console.error("Error sending message:", error);
     }
-  }, []);
+  }, [onEntryCreated]);
 
   const retryMessage = useCallback(
     async (messageId: string) => {
@@ -202,7 +228,7 @@ export const useChatState = (onEntryCreated?: () => void) => {
       if (!message || message.kind !== "entry" || message.status !== "failed")
         return;
 
-      await sendMessage(message.content, message.type);
+      await sendMessage(message.content);
       setMessages((prevMessages) =>
         prevMessages.filter((msg) => msg.id !== messageId)
       );

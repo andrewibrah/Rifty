@@ -27,9 +27,9 @@ Then press:
 
 ### Main Screen
 
-- **3 Buttons at bottom**: JOURNAL / GOAL / SCHEDULE - tap to select type
-- **Text input**: Type your entry
-- **Send button**: Save entry (shows "Riflett is responding..." briefly)
+- **Auto classification**: Every message is routed to Journal, Goal, or Schedule automatically.
+- **Text input**: Type your entry and tap **Send**.
+- **Badge**: Each bubble shows the resolved type so you can confirm the intent.
 
 ### Header
 
@@ -48,6 +48,26 @@ Then press:
 
 ## That's It
 
-- Everything saves locally (SQLite)
-- AI uses OpenAI API for coaching/insights
-- Long-press to delete (no clutter)
+- Entries sync to Supabase and include AI intent metadata.
+- AI uses OpenAI for intent detection and coaching/insights.
+- Long-press to delete (no clutter).
+
+## Edge Function
+
+Run the classifier locally:
+
+```bash
+supabase functions serve classify_and_create_entry
+```
+
+Happy-path test call (replace the tokens with real values):
+
+```bash
+curl \
+  -X POST \
+  "$SUPABASE_URL/functions/v1/classify_and_create_entry" \
+  -H "Authorization: Bearer ACCESS_TOKEN" \
+  -H "apikey: $SUPABASE_ANON_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"Run 5k every Tuesday morning."}'
+```

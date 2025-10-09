@@ -1,0 +1,305 @@
+-- 00_extension_pgcrypto.sql
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- 01_types_enum.sql
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_type
+    WHERE typname = 'entry_type' AND typnamespace = 'public'::regnamespace
+  ) THEN
+    CREATE TYPE public.entry_type AS ENUM ('journal', 'goal', 'schedule');
+  END IF;
+END $$;
+-- 02_tables_core.sql
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id uuid PRIMARY KEY REFERENCES auth.users (id) ON DELETE CASCADE,
+  username text,
+  website text,
+  avatar_url text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.entries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+  type public.entry_type NOT NULL,
+  content text NOT NULL,
+  metadata jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.messages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id uuid NOT NULL REFERENCES public.entries (id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+  role text NOT NULL CHECK (role IN ('system','user','assistant')),
+  content text NOT NULL,
+  metadata jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- 03_columns_backfill.sql
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS username text,
+  ADD COLUMN IF NOT EXISTS website text,
+  ADD COLUMN IF NOT EXISTS avatar_url text,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+UPDATE public.profiles SET created_at = now() WHERE created_at IS NULL;
+UPDATE public.profiles SET updated_at = now() WHERE updated_at IS NULL;
+
+ALTER TABLE public.entries
+  ADD COLUMN IF NOT EXISTS metadata jsonb,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+UPDATE public.entries SET updated_at = now() WHERE updated_at IS NULL;
+
+ALTER TABLE public.messages
+  ADD COLUMN IF NOT EXISTS metadata jsonb,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+UPDATE public.messages SET updated_at = now() WHERE updated_at IS NULL;
+
+-- 04_constraints_defaults.sql
+ALTER TABLE public.profiles
+  ALTER COLUMN created_at SET NOT NULL,
+  ALTER COLUMN created_at SET DEFAULT now(),
+  ALTER COLUMN updated_at SET NOT NULL,
+  ALTER COLUMN updated_at SET DEFAULT now();
+
+ALTER TABLE public.entries
+  ALTER COLUMN created_at SET NOT NULL,
+  ALTER COLUMN created_at SET DEFAULT now(),
+  ALTER COLUMN updated_at SET NOT NULL,
+  ALTER COLUMN updated_at SET DEFAULT now();
+
+ALTER TABLE public.messages
+  ALTER COLUMN created_at SET NOT NULL,
+  ALTER COLUMN created_at SET DEFAULT now(),
+  ALTER COLUMN updated_at SET NOT NULL,
+  ALTER COLUMN updated_at SET DEFAULT now();
+
+-- 05_coerce_entry_type.sql
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='entries'
+      AND column_name='type' AND udt_name <> 'entry_type'
+  ) THEN
+    ALTER TABLE public.entries
+      ALTER COLUMN type TYPE public.entry_type
+      USING lower(type)::public.entry_type;
+  END IF;
+END $$;
+
+-- 06_triggers_updated_at.sql
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS set_profiles_updated_at ON public.profiles;
+CREATE TRIGGER set_profiles_updated_at
+  BEFORE UPDATE ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+DROP TRIGGER IF EXISTS set_entries_updated_at ON public.entries;
+CREATE TRIGGER set_entries_updated_at
+  BEFORE UPDATE ON public.entries
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+DROP TRIGGER IF EXISTS set_messages_updated_at ON public.messages;
+CREATE TRIGGER set_messages_updated_at
+  BEFORE UPDATE ON public.messages
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- 07_policies_create.sql
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname='profiles_select_own' AND polrelid='public.profiles'::regclass) THEN
+    CREATE POLICY profiles_select_own ON public.profiles
+      FOR SELECT TO authenticated
+      USING (id = auth.uid());
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname='profiles_insert_own' AND polrelid='public.profiles'::regclass) THEN
+    CREATE POLICY profiles_insert_own ON public.profiles
+      FOR INSERT TO authenticated
+      WITH CHECK (id = auth.uid());
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname='profiles_update_own' AND polrelid='public.profiles'::regclass) THEN
+    CREATE POLICY profiles_update_own ON public.profiles
+      FOR UPDATE TO authenticated
+      USING (id = auth.uid()) WITH CHECK (id = auth.uid());
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname='profiles_delete_own' AND polrelid='public.profiles'::regclass) THEN
+    CREATE POLICY profiles_delete_own ON public.profiles
+      FOR DELETE TO authenticated
+      USING (id = auth.uid());
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname='entries_select_own' AND polrelid='public.entries'::regclass) THEN
+    CREATE POLICY entries_select_own ON public.entries
+      FOR SELECT TO authenticated
+      USING (user_id = auth.uid());
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname='entries_insert_own' AND polrelid='public.entries'::regclass) THEN
+    CREATE POLICY entries_insert_own ON public.entries
+      FOR INSERT TO authenticated
+      WITH CHECK (user_id = auth.uid());
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname='entries_update_own' AND polrelid='public.entries'::regclass) THEN
+    CREATE POLICY entries_update_own ON public.entries
+      FOR UPDATE TO authenticated
+      USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname='entries_delete_own' AND polrelid='public.entries'::regclass) THEN
+    CREATE POLICY entries_delete_own ON public.entries
+      FOR DELETE TO authenticated
+      USING (user_id = auth.uid());
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname='messages_select_own' AND polrelid='public.messages'::regclass) THEN
+    CREATE POLICY messages_select_own ON public.messages
+      FOR SELECT TO authenticated
+      USING (user_id = auth.uid());
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname='messages_insert_own' AND polrelid='public.messages'::regclass) THEN
+    CREATE POLICY messages_insert_own ON public.messages
+      FOR INSERT TO authenticated
+      WITH CHECK (user_id = auth.uid());
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname='messages_update_own' AND polrelid='public.messages'::regclass) THEN
+    CREATE POLICY messages_update_own ON public.messages
+      FOR UPDATE TO authenticated
+      USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname='messages_delete_own' AND polrelid='public.messages'::regclass) THEN
+    CREATE POLICY messages_delete_own ON public.messages
+      FOR DELETE TO authenticated
+      USING (user_id = auth.uid());
+  END IF;
+END $$;
+
+-- 08_rls_enable.sql
+ALTER TABLE public.profiles  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.entries   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.messages  ENABLE ROW LEVEL SECURITY;
+
+-- 09_grants.sql
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.profiles  TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.entries   TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.messages  TO authenticated;
+
+-- 10_indexes_core.sql
+CREATE INDEX IF NOT EXISTS profiles_updated_at_idx
+  ON public.profiles (updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS entries_user_created_at_idx
+  ON public.entries (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS entries_user_type_created_at_idx
+  ON public.entries (user_id, type, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS messages_user_conversation_created_at_idx
+  ON public.messages (user_id, conversation_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS messages_conversation_created_at_idx
+  ON public.messages (conversation_id, created_at DESC);
+
+-- 10b_indexes_optional.sql
+-- Fast filter on JSON metadata keys/values
+CREATE INDEX IF NOT EXISTS entries_metadata_gin_idx
+  ON public.entries USING GIN (metadata);
+
+CREATE INDEX IF NOT EXISTS messages_metadata_gin_idx
+  ON public.messages USING GIN (metadata);
+
+-- Full-text/trigram (requires pg_trgm) if you search large texts
+-- CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- CREATE INDEX IF NOT EXISTS entries_content_trgm_idx ON public.entries USING GIN (content gin_trgm_ops);
+-- CREATE INDEX IF NOT EXISTS messages_content_trgm_idx ON public.messages USING GIN (content gin_trgm_ops);
+
+-- 11_postgrest_reload.sql
+NOTIFY pgrst, 'reload schema';
+
+-- 12_checks.sql
+SELECT enum_range(NULL::public.entry_type) AS entry_type_values;
+SELECT relname, relrowsecurity FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname='public' AND relname IN ('profiles','entries','messages');
+
+-- Expect rows returned for your uid only:
+-- SELECT * FROM public.entries WHERE user_id = auth.uid();
+
+13. SQL editor → run this once
+
+  -- Adds AI metadata columns used by the classifier
+  ALTER TABLE public.entries
+    ADD COLUMN IF NOT EXISTS ai_intent text,
+    ADD COLUMN IF NOT EXISTS ai_confidence double precision,
+    ADD COLUMN IF NOT EXISTS ai_meta jsonb,
+    ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'user';
+
+  ALTER TABLE public.entries
+    ADD CONSTRAINT IF NOT EXISTS entries_source_check
+      CHECK (source IN ('user', 'system', 'ai'));
+
+  ALTER TABLE public.entries
+    ADD CONSTRAINT IF NOT EXISTS entries_ai_confidence_check
+      CHECK (
+        ai_confidence IS NULL
+        OR (ai_confidence >= 0 AND ai_confidence <= 1)
+      );
+
+  UPDATE public.entries
+  SET source = 'user'
+  WHERE source IS NULL;
+
+// Codex Changes
+-- when adding changes below, use number then add/remoce (code) 
+-- or if new, add above to use next number and groupname completed and logged below as just "groupname" added 
+
+
+
+
+
+
+
+
+
+
+// Edge functions 
+-- Edge Function classify_and_create_entry
+-- Deploy with: supabase functions deploy classify_and_create_entry
+-- Requires secrets:
+--   supabase secrets set OPENAI_API_KEY=...
+--   supabase secrets set PROJECT_URL=...            -- usually your Supabase URL
+--   supabase secrets set SERVICE_ROLE_KEY=...       -- service role key for inserts
+-- Handles POST { content } with user JWT, classifies intent via OpenAI, inserts into public.entries with ai_* columns.
+-- Returns inserted row (type, ai_intent, ai_confidence, ai_meta, source='user').
+
+-- Migration 20250108000000_add_ai_metadata_to_entries.sql adds columns:
+--   ai_intent text
+--   ai_confidence double precision (0-1 check)
+--   ai_meta jsonb
+--   source text DEFAULT 'user' CHECK source IN ('user','system','ai')
+-- Run locally via supabase db push or apply in SQL editor before using classifier.

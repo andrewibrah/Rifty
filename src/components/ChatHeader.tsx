@@ -7,12 +7,16 @@ import { useTheme } from "../contexts/ThemeContext";
 interface ChatHeaderProps {
   onHistoryPress: () => void;
   onClearPress: () => void;
+  onCalendarPress: () => void;
+  onPersonalizationPress: () => void;
   hasContent: boolean;
 }
 
 const ChatHeader: React.FC<ChatHeaderProps> = ({
   onHistoryPress,
   onClearPress,
+  onCalendarPress,
+  onPersonalizationPress,
   hasContent,
 }) => {
   const { themeMode } = useTheme();
@@ -31,18 +35,44 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
       <View style={styles.titleContainer}>
         <Text style={styles.title}>riflett</Text>
       </View>
-      <TouchableOpacity
-        onPress={onClearPress}
-        style={styles.clearButton}
-        accessibilityRole="button"
-        accessibilityLabel="New chat"
-      >
-        <Ionicons
-          name="create-outline"
-          size={20}
-          color={colors.textSecondary}
-        />
-      </TouchableOpacity>
+      <View style={styles.rightActions}>
+        <TouchableOpacity
+          onPress={onCalendarPress}
+          style={styles.iconButton}
+          accessibilityRole="button"
+          accessibilityLabel="Open schedule calendar"
+        >
+          <Ionicons
+            name="calendar-outline"
+            size={20}
+            color={colors.textSecondary}
+          />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={onPersonalizationPress}
+          style={[styles.iconButton, styles.iconButtonSpacing]}
+          accessibilityRole="button"
+          accessibilityLabel="Open personalization settings"
+        >
+          <Ionicons
+            name="person-circle-outline"
+            size={20}
+            color={colors.textSecondary}
+          />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={onClearPress}
+          style={[styles.iconButton, styles.iconButtonSpacing]}
+          accessibilityRole="button"
+          accessibilityLabel="New chat"
+        >
+          <Ionicons
+            name="create-outline"
+            size={20}
+            color={colors.textSecondary}
+          />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
@@ -88,6 +118,21 @@ const createStyles = (colors: any) =>
       justifyContent: "center",
       minWidth: 36,
       minHeight: 36,
+    },
+    rightActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+    },
+    iconButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      minWidth: 36,
+      minHeight: 36,
+    },
+    iconButtonSpacing: {
+      marginLeft: spacing.sm,
     },
   });
 

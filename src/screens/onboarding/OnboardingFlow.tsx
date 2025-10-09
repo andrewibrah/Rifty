@@ -1,0 +1,321 @@
+import React, { useMemo, useState } from 'react'
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+} from 'react-native'
+import { useTheme } from '../../contexts/ThemeContext'
+import { getColors, spacing, radii, typography } from '../../theme'
+import type {
+  PersonalizationState,
+  PersonaTag,
+  PersonalizationMode,
+  ReflectionCadence,
+  GoalKey,
+  LanguageIntensity,
+  UserSettings,
+} from '../../types/personalization'
+import IntroStep from './steps/IntroStep'
+import IdentityStep from './steps/IdentityStep'
+import GoalsStep from './steps/GoalsStep'
+import WorkingStyleStep from './steps/WorkingStyleStep'
+import ToneStep from './steps/ToneStep'
+import AnchorsStep from './steps/AnchorsStep'
+import ReviewStep from './steps/ReviewStep'
+
+const GOAL_OPTIONS: GoalKey[] = [
+  'health',
+  'relationships',
+  'career',
+  'execution',
+  'performance',
+  'creativity',
+  'mindfulness',
+  'learning',
+]
+
+export interface OnboardingFlowProps {
+  initialSettings?: UserSettings | null
+  initialTimezone: string
+  onPersist: (state: PersonalizationState, timezone: string) => Promise<PersonaTag>
+  onComplete: (persona: PersonaTag) => void
+}
+
+const defaultState: PersonalizationState = {
+  personalization_mode: 'full',
+  local_cache_enabled: true,
+  cadence: 'daily',
+  goals: [],
+  extra_goal: null,
+  learning_style: { visual: 5, auditory: 5, kinesthetic: 5 },
+  session_length_minutes: 25,
+  spiritual_prompts: false,
+  bluntness: 5,
+  language_intensity: 'neutral',
+  logging_format: 'mixed',
+  drift_rule: { enabled: false, after: null },
+  crisis_card: null,
+}
+
+const STEPS = 7
+
+const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
+  initialSettings,
+  initialTimezone,
+  onPersist,
+  onComplete,
+}) => {
+  const { themeMode } = useTheme()
+  const colors = getColors(themeMode)
+  const styles = useMemo(() => createStyles(colors), [colors])
+
+  const mergedInitial: PersonalizationState = {
+    ...defaultState,
+    ...(initialSettings ?? {}),
+  }
+
+  const [state, setState] = useState<PersonalizationState>(mergedInitial)
+  const [timezone, setTimezone] = useState(initialTimezone)
+  const [step, setStep] = useState(0)
+  const [consentAccepted, setConsentAccepted] = useState(false)
+  const [reviewConfirmed, setReviewConfirmed] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const mode = state.personalization_mode
+
+  const handleUpdate = (patch: Partial<PersonalizationState>) => {
+    setState((prev) => ({ ...prev, ...patch }))
+  }
+
+  const canAdvance = () => {
+    if (step === 0) return consentAccepted
+    if (step === STEPS - 1) return reviewConfirmed
+    return true
+  }
+
+  const handleNext = () => {
+    if (step < STEPS - 1) {
+      setStep((prev) => prev + 1)
+    }
+  }
+
+  const handleBack = () => {
+    if (step > 0) {
+      setStep((prev) => prev - 1)
+    }
+  }
+
+  const handleSkip = () => {
+    if (step < STEPS - 1) {
+      setStep((prev) => prev + 1)
+    }
+  }
+
+  const handleFinish = async () => {
+    if (!canAdvance()) return
+    setIsSubmitting(true)
+    try {
+      const persona = await onPersist(state, timezone)
+      onComplete(persona)
+    } catch (error) {
+      Alert.alert('Save failed', 'We could not save your personalization yet. Please try again.')
+      console.error('Failed to persist onboarding state', error)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const stepContent = () => {
+    switch (step) {
+      case 0:
+        return (
+          <IntroStep
+            mode={mode}
+            localCacheEnabled={state.local_cache_enabled}
+            consentAccepted={consentAccepted}
+            onModeChange={(value: PersonalizationMode) => handleUpdate({ personalization_mode: value })}
+            onConsentChange={setConsentAccepted}
+            onCacheToggle={(enabled) => handleUpdate({ local_cache_enabled: enabled })}
+          />
+        )
+      case 1:
+        return (
+          <IdentityStep
+            timezone={timezone}
+            onTimezoneChange={setTimezone}
+            cadence={state.cadence}
+            onCadenceChange={(value: ReflectionCadence) => handleUpdate({ cadence: value })}
+            mode={mode}
+          />
+        )
+      case 2:
+        return (
+          <GoalsStep
+            selectedGoals={state.goals}
+            onGoalsChange={(goals: GoalKey[]) => handleUpdate({ goals })}
+            goalOptions={GOAL_OPTIONS}
+            mode={mode}
+            extraGoal={state.extra_goal ?? ''}
+            onExtraGoalChange={(value) => handleUpdate({ extra_goal: value })}
+          />
+        )
+      case 3:
+        return (
+          <WorkingStyleStep
+            learningStyle={state.learning_style}
+            sessionLength={state.session_length_minutes}
+            onLearningStyleChange={(value) => handleUpdate({ learning_style: value })}
+            onSessionLengthChange={(value) =>
+              handleUpdate({ session_length_minutes: value as PersonalizationState['session_length_minutes'] })
+            }
+            mode={mode}
+          />
+        )
+      case 4:
+        return (
+          <ToneStep
+            bluntness={state.bluntness}
+            languageIntensity={state.language_intensity}
+            loggingFormat={state.logging_format}
+            spiritualPrompts={state.spiritual_prompts}
+            onUpdate={(patch) => handleUpdate(patch)}
+            mode={mode}
+          />
+        )
+      case 5:
+        return (
+          <AnchorsStep
+            driftRule={state.drift_rule}
+            crisisCard={state.crisis_card ?? ''}
+            onDriftRuleChange={(value) => handleUpdate({ drift_rule: value })}
+            onCrisisCardChange={(value) => handleUpdate({ crisis_card: value })}
+            mode={mode}
+          />
+        )
+      case 6:
+      default:
+        return (
+          <ReviewStep
+            state={state}
+            timezone={timezone}
+            confirmed={reviewConfirmed}
+            onConfirmChange={setReviewConfirmed}
+          />
+        )
+    }
+  }
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.progress}>{`Step ${step + 1}/${STEPS}`}</Text>
+        <Text style={styles.title}>Get to know you</Text>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.content}>
+        {stepContent()}
+      </ScrollView>
+
+      <View style={styles.footer}>
+        <View style={styles.footerRow}>
+          <TouchableOpacity
+            onPress={handleBack}
+            style={[styles.secondaryButton, step === 0 && styles.disabledButton]}
+            disabled={step === 0}
+          >
+            <Text style={styles.secondaryText}>Back</Text>
+          </TouchableOpacity>
+          {step < STEPS - 1 && step !== 0 && (
+            <TouchableOpacity onPress={handleSkip} style={styles.secondaryButton}>
+              <Text style={styles.secondaryText}>Skip</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <TouchableOpacity
+          onPress={step === STEPS - 1 ? handleFinish : handleNext}
+          style={[styles.primaryButton, (!canAdvance() || isSubmitting) && styles.disabledButton]}
+          disabled={!canAdvance() || isSubmitting}
+        >
+          <Text style={styles.primaryText}>{step === STEPS - 1 ? 'Finish' : 'Next'}</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  )
+}
+
+const createStyles = (colors: any) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    header: {
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.lg,
+      paddingBottom: spacing.sm,
+      alignItems: 'flex-start',
+    },
+    progress: {
+      fontFamily: typography.caption.fontFamily,
+      color: colors.textSecondary,
+      fontSize: 12,
+      marginBottom: spacing.xs,
+    },
+    title: {
+      fontFamily: typography.heading.fontFamily,
+      fontSize: 24,
+      color: colors.textPrimary,
+      fontWeight: '700',
+    },
+    content: {
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.lg,
+    },
+    footer: {
+      padding: spacing.lg,
+      borderTopWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    footerRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginBottom: spacing.md,
+    },
+    primaryButton: {
+      backgroundColor: colors.accent,
+      borderRadius: radii.md,
+      paddingVertical: spacing.md,
+      alignItems: 'center',
+    },
+    primaryText: {
+      color: '#fff',
+      fontFamily: typography.button.fontFamily,
+      fontWeight: '600',
+      fontSize: 16,
+    },
+    secondaryButton: {
+      flex: 1,
+      marginRight: spacing.sm,
+      borderRadius: radii.md,
+      paddingVertical: spacing.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    secondaryText: {
+      fontFamily: typography.button.fontFamily,
+      color: colors.textSecondary,
+      fontSize: 14,
+    },
+    disabledButton: {
+      opacity: 0.5,
+    },
+  })
+
+export default OnboardingFlow

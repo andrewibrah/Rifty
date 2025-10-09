@@ -10,6 +10,9 @@ export interface Message {
 export interface EntryMessage extends Message {
   kind: 'entry';
   type: EntryType;
+  aiIntent?: string | null;
+  aiConfidence?: number | null;
+  aiMeta?: Record<string, any> | null;
 }
 
 export interface BotMessage extends Message {
