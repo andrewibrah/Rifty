@@ -55,7 +55,7 @@ const fetchProfile = async (): Promise<ProfileSnapshot | null> => {
   if (!user) return null
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, timezone, onboarding_completed, updated_at')
+    .select('*')
     .eq('id', user.id)
     .maybeSingle()
   if (error) {
@@ -64,7 +64,19 @@ const fetchProfile = async (): Promise<ProfileSnapshot | null> => {
   }
 
   if (data) {
-    return data as ProfileSnapshot
+    const rawProfile = data as Record<string, any>
+    const fallbackTimezone =
+      Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC'
+    const profile: ProfileSnapshot = {
+      id: (rawProfile.id as string) ?? user.id,
+      timezone:
+        typeof rawProfile.timezone === 'string' && rawProfile.timezone.length > 0
+          ? rawProfile.timezone
+          : fallbackTimezone,
+      onboarding_completed: Boolean(rawProfile.onboarding_completed),
+      updated_at: (rawProfile.updated_at as string | null) ?? nowIso(),
+    }
+    return profile
   }
 
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC'
@@ -75,11 +87,29 @@ const fetchProfile = async (): Promise<ProfileSnapshot | null> => {
     updated_at: nowIso(),
   }
 
+  const insertPayload: Record<string, any> = {
+    id: user.id,
+    timezone,
+    onboarding_completed: false,
+  }
+
   const { error: insertError } = await supabase
     .from('profiles')
-    .insert({ id: user.id, timezone, onboarding_completed: false })
+    .insert(insertPayload)
+
   if (insertError) {
-    console.error('Failed to initialize profile', insertError)
+    if (insertError.code === '42703') {
+      const fallbackPayload = { ...insertPayload }
+      delete fallbackPayload.timezone
+      const { error: fallbackError } = await supabase
+        .from('profiles')
+        .insert(fallbackPayload)
+      if (fallbackError) {
+        console.error('Failed to initialize profile without timezone column', fallbackError)
+      }
+    } else {
+      console.error('Failed to initialize profile', insertError)
+    }
   }
   return newProfile
 }
@@ -163,17 +193,33 @@ export const persistPersonalization = async (
     throw settingsError
   }
 
+  const profileUpdatePayload: Record<string, any> = {
+    timezone: options.profileTimezone,
+    onboarding_completed: options.onboardingCompleted,
+    updated_at: nowIso(),
+  }
+
   const { error: profileError } = await supabase
     .from('profiles')
-    .update({
-      timezone: options.profileTimezone,
-      onboarding_completed: options.onboardingCompleted,
-      updated_at: nowIso(),
-    })
+    .update(profileUpdatePayload)
     .eq('id', user.id)
+
   if (profileError) {
-    console.error('Failed to update profile', profileError)
-    throw profileError
+    if (profileError.code === '42703') {
+      const fallbackPayload = { ...profileUpdatePayload }
+      delete fallbackPayload.timezone
+      const { error: fallbackError } = await supabase
+        .from('profiles')
+        .update(fallbackPayload)
+        .eq('id', user.id)
+      if (fallbackError) {
+        console.error('Failed to update profile without timezone column', fallbackError)
+        throw fallbackError
+      }
+    } else {
+      console.error('Failed to update profile', profileError)
+      throw profileError
+    }
   }
 
   await storeCachedSettings(payload)
