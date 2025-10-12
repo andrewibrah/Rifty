@@ -27,7 +27,7 @@ const AnchorsStep: React.FC<AnchorsStepProps> = ({
     <View>
       <Text style={styles.heading}>Anchors & safeties</Text>
       <Text style={styles.body}>
-        Define gentle guardrails for future-you. Reflectify surfaces them only when the
+        Define gentle guardrails for future-you. Riflett surfaces them only when the
         pattern fits.
       </Text>
 
@@ -36,7 +36,7 @@ const AnchorsStep: React.FC<AnchorsStepProps> = ({
           <View style={styles.copy}>
             <Text style={styles.label}>2-step anchor rule</Text>
             <Text style={styles.helper}>
-              When drift happens after a set time, Reflectify will remind you to pause,
+              When drift happens after a set time, Riflett will remind you to pause,
               breathe, and refocus.
             </Text>
           </View>
@@ -69,7 +69,7 @@ const AnchorsStep: React.FC<AnchorsStepProps> = ({
           onChangeText={onCrisisCardChange}
         />
         <Text style={styles.helper}>
-          Stored privately. Only you and Reflectify see this.
+          Stored privately. Only you and Riflett see this.
         </Text>
         {mode === 'basic' && (
           <Text style={styles.helper}>Basic mode keeps this note offline when local cache is enabled.</Text>

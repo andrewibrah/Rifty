@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   StyleSheet,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getColors, radii, spacing, typography, shadows } from "../theme";
 import { useTheme } from "../contexts/ThemeContext";
 
@@ -21,10 +23,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
   onSend,
 }) => {
   const { themeMode } = useTheme();
+  const insets = useSafeAreaInsets();
   const colors = getColors(themeMode);
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createStyles(colors, insets), [colors, insets]);
   const [isFocused, setIsFocused] = useState(false);
+  const [isUserTyping, setIsUserTyping] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disableSend = !content.trim();
 
   const scheduleTemplate = "Place | Time | Reason";
@@ -48,23 +53,55 @@ const MessageInput: React.FC<MessageInputProps> = ({
       return { start: clamp(start), end: clamp(end) };
     }
 
-    const start = secondPipe >= 0 ? secondPipe + 2 : firstPipe >= 0 ? firstPipe + 2 : 0;
+    const start =
+      secondPipe >= 0 ? secondPipe + 2 : firstPipe >= 0 ? firstPipe + 2 : 0;
     return { start: clamp(start), end: text.length };
   };
 
   const focusSegment = (segment: ScheduleSegment, textOverride?: string) => {
+    // Don't manipulate cursor if user is actively typing
+    if (isUserTyping) return;
+
     const targetText = textOverride ?? content;
     const range = getSegmentRange(targetText, segment);
     inputRef.current?.focus();
-    requestAnimationFrame(() => {
-      inputRef.current?.setNativeProps({ selection: range });
-    });
+    // Use a longer delay to ensure the input is focused before setting selection
+    setTimeout(() => {
+      if (inputRef.current && !isUserTyping) {
+        inputRef.current.setNativeProps({ selection: range });
+      }
+    }, 100);
   };
 
   const handleInsertScheduleTemplate = () => {
     onContentChange(scheduleTemplate);
-    setTimeout(() => focusSegment("place", scheduleTemplate), 0);
+    // Only focus the segment if the input is currently focused
+    if (inputRef.current?.isFocused()) {
+      setTimeout(() => focusSegment("place", scheduleTemplate), 50);
+    }
   };
+
+  const handleTextChange = (text: string) => {
+    setIsUserTyping(true);
+    onContentChange(text);
+
+    // Clear existing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    // Reset typing state after a short delay
+    typingTimeoutRef.current = setTimeout(() => setIsUserTyping(false), 500);
+  };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const showScheduleShortcuts = content.includes("|");
 
@@ -102,15 +139,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
           </View>
         )}
       </View>
-      <Text style={styles.helperText}>
-        Entries are auto-classified into journals, goals, or schedules.
-      </Text>
       <View style={styles.inputRow}>
         <TextInput
           ref={inputRef}
           style={[styles.input, isFocused && styles.inputFocused]}
           value={content}
-          onChangeText={onContentChange}
+          onChangeText={handleTextChange}
           placeholder="Type your reflection..."
           placeholderTextColor={colors.textTertiary}
           multiline
@@ -123,25 +157,22 @@ const MessageInput: React.FC<MessageInputProps> = ({
           style={[styles.sendButton, disableSend && styles.sendButtonDisabled]}
           disabled={disableSend}
         >
-          <Text
-            style={[
-              styles.sendButtonText,
-              disableSend && styles.sendButtonTextDisabled,
-            ]}
-          >
-            Send
-          </Text>
+          <Ionicons
+            name="arrow-up"
+            size={20}
+            color={disableSend ? colors.textTertiary : colors.textPrimary}
+          />
         </TouchableOpacity>
       </View>
     </View>
   );
 };
 
-const createStyles = (colors: any) =>
+const createStyles = (colors: any, insets: any) =>
   StyleSheet.create({
     wrapper: {
-      padding: spacing.md,
-      paddingBottom: spacing.lg,
+      padding: spacing.lg,
+      paddingBottom: Math.max(spacing.xl, insets.bottom + spacing.md), // Use safe area bottom inset with more padding
       backgroundColor: colors.background,
     },
     scheduleRow: {
@@ -196,12 +227,12 @@ const createStyles = (colors: any) =>
     },
     input: {
       flex: 1,
-      minHeight: 48,
+      minHeight: 52,
       maxHeight: 120,
       backgroundColor: colors.surface,
       borderRadius: radii.md,
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.md,
+      paddingVertical: spacing.md + 2,
       marginRight: spacing.sm,
       fontFamily: typography.body.fontFamily,
       fontWeight: typography.body.fontWeight,
@@ -220,28 +251,17 @@ const createStyles = (colors: any) =>
     sendButton: {
       backgroundColor: colors.accent,
       borderRadius: radii.md,
-      paddingVertical: spacing.sm + 2,
-      paddingHorizontal: spacing.lg,
+      width: 52,
+      height: 52,
       borderWidth: 1,
       borderColor: colors.accent,
       justifyContent: "center",
       alignItems: "center",
-      minHeight: 48,
       ...shadows.glow,
     },
     sendButtonDisabled: {
       borderColor: colors.borderLight,
       backgroundColor: colors.surface,
-    },
-    sendButtonText: {
-      fontFamily: typography.button.fontFamily,
-      letterSpacing: typography.button.letterSpacing,
-      fontSize: 15,
-      fontWeight: "700" as const,
-      color: colors.textPrimary,
-    },
-    sendButtonTextDisabled: {
-      color: colors.textTertiary,
     },
   });
 

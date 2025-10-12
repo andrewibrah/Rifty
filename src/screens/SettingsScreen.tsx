@@ -1,5 +1,11 @@
 import React, { useMemo } from "react";
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  ScrollView,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
@@ -7,133 +13,81 @@ import { getColors, radii, spacing, typography } from "../theme";
 import { useTheme } from "../contexts/ThemeContext";
 import type { Session } from "@supabase/supabase-js";
 
-interface SettingsModalProps {
-  visible: boolean;
-  onClose: () => void;
-  session: Session;
+interface SettingsScreenProps {
+  onBack: () => void;
   onPersonalizationPress?: () => void;
+  session: Session;
 }
 
-const SettingsModal: React.FC<SettingsModalProps> = ({
-  visible,
-  onClose,
-  session,
+const SettingsScreen: React.FC<SettingsScreenProps> = ({
+  onBack,
   onPersonalizationPress,
+  session,
 }) => {
   const { themeMode, toggleTheme, isDark, isSystemTheme } = useTheme();
   const colors = getColors(themeMode);
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   return (
-    <Modal
-      visible={visible}
-      animationType="fade"
-      transparent
-      onRequestClose={onClose}
-    >
-      <View style={styles.overlay}>
-        <SafeAreaView style={styles.modalCard}>
-          <View style={styles.modalHeader}>
-            <View style={styles.headerButtonPlaceholder} />
-            <Text style={styles.modalTitle}>Settings</Text>
-            <TouchableOpacity onPress={onClose} style={styles.headerButton}>
-              <Ionicons
-                name="arrow-back-outline"
-                size={20}
-                color={colors.textPrimary}
-              />
-            </TouchableOpacity>
-          </View>
+    <View style={styles.container}>
+      <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+            <Ionicons
+              name="arrow-back-outline"
+              size={20}
+              color={colors.textPrimary}
+            />
+          </TouchableOpacity>
+          <Text style={styles.title}>Settings</Text>
+          <View style={styles.headerSpacer} />
+        </View>
 
-          <View style={styles.content}>
-            {/* Account Section */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Account</Text>
-              <View style={styles.accountCard}>
-                <View style={styles.accountIconContainer}>
-                  <Ionicons
-                    name="person-outline"
-                    size={20}
-                    color={colors.accent}
-                  />
-                </View>
-                <View style={styles.accountInfo}>
-                  <Text style={styles.accountLabel}>Email</Text>
-                  <Text style={styles.accountEmail}>
-                    {session?.user?.email}
-                  </Text>
-                </View>
+        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+          {/* Account Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Account</Text>
+            <View style={styles.accountCard}>
+              <View style={styles.accountIconContainer}>
+                <Ionicons
+                  name="person-outline"
+                  size={20}
+                  color={colors.accent}
+                />
+              </View>
+              <View style={styles.accountInfo}>
+                <Text style={styles.accountLabel}>Email</Text>
+                <Text style={styles.accountEmail}>{session?.user?.email}</Text>
               </View>
             </View>
+          </View>
 
-            {/* Personalization Button */}
-            {onPersonalizationPress && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Profile</Text>
-                <TouchableOpacity
-                  style={[
-                    styles.personalizationButton,
-                    { borderLeftColor: colors.accent, borderLeftWidth: 2 },
-                  ]}
-                  onPress={() => {
-                    onPersonalizationPress();
-                  }}
-                >
-                  <View style={styles.personalizationIconContainer}>
-                    <Ionicons
-                      name="person-circle-outline"
-                      size={20}
-                      color={colors.accent}
-                    />
-                  </View>
-                  <View style={styles.personalizationInfo}>
-                    <Text style={styles.personalizationLabel}>
-                      Personalization
-                    </Text>
-                    <Text style={styles.personalizationValue}>
-                      Goals, learning style, and preferences
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name="chevron-forward-outline"
-                    size={16}
-                    color={colors.textSecondary}
-                  />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Color Scheme Button */}
+          {/* Personalization Button */}
+          {onPersonalizationPress && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Appearance</Text>
+              <Text style={styles.sectionTitle}>Profile</Text>
               <TouchableOpacity
                 style={[
-                  styles.colorSchemeButton,
+                  styles.personalizationButton,
                   { borderLeftColor: colors.accent, borderLeftWidth: 2 },
                 ]}
-                onPress={toggleTheme}
+                onPress={() => {
+                  onPersonalizationPress();
+                }}
               >
-                <View style={styles.colorSchemeIconContainer}>
+                <View style={styles.personalizationIconContainer}>
                   <Ionicons
-                    name={
-                      isSystemTheme
-                        ? "phone-portrait-outline"
-                        : isDark
-                          ? "moon-outline"
-                          : "sunny-outline"
-                    }
+                    name="person-circle-outline"
                     size={20}
                     color={colors.accent}
                   />
                 </View>
-                <View style={styles.colorSchemeInfo}>
-                  <Text style={styles.colorSchemeLabel}>Theme</Text>
-                  <Text style={styles.colorSchemeValue}>
-                    {isSystemTheme
-                      ? "System Theme"
-                      : isDark
-                        ? "Dark Mode"
-                        : "Light Mode"}
+                <View style={styles.personalizationInfo}>
+                  <Text style={styles.personalizationLabel}>
+                    Personalization
+                  </Text>
+                  <Text style={styles.personalizationValue}>
+                    Goals, learning style, and preferences
                   </Text>
                 </View>
                 <Ionicons
@@ -143,60 +97,93 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 />
               </TouchableOpacity>
             </View>
+          )}
 
-            {/* Logout Button */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Actions</Text>
-              <TouchableOpacity
-                style={styles.logoutButton}
-                onPress={() => supabase.auth.signOut()}
-              >
-                <View style={styles.logoutIconContainer}>
-                  <Ionicons
-                    name="log-out-outline"
-                    size={18}
-                    color={colors.error}
-                  />
-                </View>
-                <Text style={styles.logoutButtonText}>Sign Out</Text>
-              </TouchableOpacity>
-            </View>
+          {/* Color Scheme Button */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Appearance</Text>
+            <TouchableOpacity
+              style={[
+                styles.colorSchemeButton,
+                { borderLeftColor: colors.accent, borderLeftWidth: 2 },
+              ]}
+              onPress={toggleTheme}
+            >
+              <View style={styles.colorSchemeIconContainer}>
+                <Ionicons
+                  name={
+                    isSystemTheme
+                      ? "phone-portrait-outline"
+                      : isDark
+                        ? "moon-outline"
+                        : "sunny-outline"
+                  }
+                  size={20}
+                  color={colors.accent}
+                />
+              </View>
+              <View style={styles.colorSchemeInfo}>
+                <Text style={styles.colorSchemeLabel}>Theme</Text>
+                <Text style={styles.colorSchemeValue}>
+                  {isSystemTheme
+                    ? "System Theme"
+                    : isDark
+                      ? "Dark Mode"
+                      : "Light Mode"}
+                </Text>
+              </View>
+              <Ionicons
+                name="chevron-forward-outline"
+                size={16}
+                color={colors.textSecondary}
+              />
+            </TouchableOpacity>
           </View>
-        </SafeAreaView>
-      </View>
-    </Modal>
+
+          {/* Logout Button */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Actions</Text>
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={() => supabase.auth.signOut()}
+            >
+              <View style={styles.logoutIconContainer}>
+                <Ionicons
+                  name="log-out-outline"
+                  size={18}
+                  color={colors.error}
+                />
+              </View>
+              <Text style={styles.logoutButtonText}>Sign Out</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </View>
   );
 };
 
 const createStyles = (colors: any) =>
   StyleSheet.create({
-    overlay: {
+    container: {
       flex: 1,
       backgroundColor: colors.background,
     },
-    modalCard: {
+    safeArea: {
       flex: 1,
-      backgroundColor: colors.background,
     },
-    modalHeader: {
+    header: {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
       paddingHorizontal: spacing.md,
       paddingTop: spacing.xl,
-      paddingBottom: spacing.sm,
-      minHeight: 60,
+      paddingBottom: spacing.lg,
+      minHeight: 80,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
     },
-    modalTitle: {
-      fontFamily: typography.heading.fontFamily,
-      fontWeight: typography.heading.fontWeight,
-      letterSpacing: typography.heading.letterSpacing,
-      fontSize: 20,
-      color: colors.textPrimary,
-      flex: 1,
-      textAlign: "center",
-    },
-    headerButton: {
+    backButton: {
       width: 44,
       height: 44,
       borderRadius: radii.sm,
@@ -205,14 +192,21 @@ const createStyles = (colors: any) =>
       alignItems: "center",
       marginRight: spacing.xs,
     },
-    headerButtonPlaceholder: {
-      width: 36,
+    title: {
+      fontFamily: typography.heading.fontFamily,
+      fontWeight: typography.heading.fontWeight,
+      letterSpacing: typography.heading.letterSpacing,
+      fontSize: 20,
+      color: colors.textPrimary,
+      flex: 1,
+      textAlign: "center",
+    },
+    headerSpacer: {
+      width: 44,
     },
     content: {
       flex: 1,
-      paddingHorizontal: spacing.lg,
-      paddingTop: spacing.sm,
-      paddingBottom: spacing.lg,
+      padding: spacing.lg,
     },
     section: {
       marginBottom: spacing.xl,
@@ -365,4 +359,4 @@ const createStyles = (colors: any) =>
     },
   });
 
-export default SettingsModal;
+export default SettingsScreen;

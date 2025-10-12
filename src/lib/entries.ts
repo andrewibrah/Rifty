@@ -16,12 +16,16 @@ export interface ClassifiedEntry {
   source: string | null;
 }
 
-const getExtra = () => (Constants.expoConfig?.extra ?? {}) as Record<string, any>;
+const getExtra = () =>
+  (Constants.expoConfig?.extra ?? {}) as Record<string, any>;
 
 function getSupabaseUrl(): string {
   const extra = getExtra();
-  const url = extra.SUPABASE_URL ?? extra.EXPO_PUBLIC_SUPABASE_URL ??
-    process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
+  const url =
+    extra.SUPABASE_URL ??
+    extra.EXPO_PUBLIC_SUPABASE_URL ??
+    process.env.EXPO_PUBLIC_SUPABASE_URL ??
+    "";
   if (!url) {
     throw new Error("Missing Supabase URL configuration");
   }
@@ -30,8 +34,11 @@ function getSupabaseUrl(): string {
 
 function getAnonKey(): string {
   const extra = getExtra();
-  const key = extra.SUPABASE_ANON_KEY ?? extra.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
-    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
+  const key =
+    extra.SUPABASE_ANON_KEY ??
+    extra.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
+    "";
   if (!key) {
     throw new Error("Missing Supabase anon key configuration");
   }
@@ -62,7 +69,9 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
-export async function createEntryFromChat(content: string): Promise<ClassifiedEntry> {
+export async function createEntryFromChat(
+  content: string
+): Promise<ClassifiedEntry> {
   const trimmedContent = content.trim();
   if (!trimmedContent) {
     throw new Error("Content is required");
@@ -74,15 +83,18 @@ export async function createEntryFromChat(content: string): Promise<ClassifiedEn
     getAccessToken(),
   ]);
 
-  const response = await fetch(`${url}/functions/v1/classify_and_create_entry`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-      apikey: anonKey,
-    },
-    body: JSON.stringify({ content: trimmedContent }),
-  });
+  const response = await fetch(
+    `${url}/functions/v1/classify_and_create_entry`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+        apikey: anonKey,
+      },
+      body: JSON.stringify({ content: trimmedContent }),
+    }
+  );
 
   if (!response.ok) {
     const message = await parseError(response);

@@ -8,7 +8,6 @@ interface ChatHeaderProps {
   onHistoryPress: () => void;
   onClearPress: () => void;
   onCalendarPress: () => void;
-  onPersonalizationPress: () => void;
   hasContent: boolean;
 }
 
@@ -16,7 +15,6 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   onHistoryPress,
   onClearPress,
   onCalendarPress,
-  onPersonalizationPress,
   hasContent,
 }) => {
   const { themeMode } = useTheme();
@@ -44,18 +42,6 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
         >
           <Ionicons
             name="calendar-outline"
-            size={20}
-            color={colors.textSecondary}
-          />
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={onPersonalizationPress}
-          style={[styles.iconButton, styles.iconButtonSpacing]}
-          accessibilityRole="button"
-          accessibilityLabel="Open personalization settings"
-        >
-          <Ionicons
-            name="person-circle-outline"
             size={20}
             color={colors.textSecondary}
           />

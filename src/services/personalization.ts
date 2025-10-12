@@ -1,5 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import { supabase } from '../lib/supabase'
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { supabase } from "../lib/supabase";
 import {
   type PersonalizationBundle,
   type PersonalizationMode,
@@ -10,159 +10,171 @@ import {
   type UserSettings,
   type CachedPersonalization,
   type PersonaTag,
-} from '../types/personalization'
-import { computePersonaTag } from '../utils/persona'
+} from "../types/personalization";
+import { computePersonaTag } from "../utils/persona";
 
-const CACHE_KEY = '@reflectify:user_settings'
+const CACHE_KEY = "@reflectify:user_settings";
 
 const parseIsoDate = (value?: string | null) =>
-  value ? new Date(value).getTime() : 0
+  value ? new Date(value).getTime() : 0;
 
-const nowIso = () => new Date().toISOString()
+const nowIso = () => new Date().toISOString();
 
 export const loadCachedSettings = async (): Promise<UserSettings | null> => {
   try {
-    const raw = await AsyncStorage.getItem(CACHE_KEY)
-    if (!raw) return null
-    const cached: CachedPersonalization = JSON.parse(raw)
-    return cached.settings
+    const raw = await AsyncStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const cached: CachedPersonalization = JSON.parse(raw);
+    return cached.settings;
   } catch (error) {
-    console.warn('Failed to load cached personalization settings', error)
-    return null
+    console.warn("Failed to load cached personalization settings", error);
+    return null;
   }
-}
+};
 
 export const storeCachedSettings = async (settings: UserSettings) => {
   try {
     if (!settings.local_cache_enabled) {
-      await AsyncStorage.removeItem(CACHE_KEY)
-      return
+      await AsyncStorage.removeItem(CACHE_KEY);
+      return;
     }
     const payload: CachedPersonalization = {
       settings,
       updated_at: settings.updated_at ?? nowIso(),
-    }
-    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(payload))
+    };
+    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(payload));
   } catch (error) {
-    console.warn('Failed to cache personalization settings', error)
+    console.warn("Failed to cache personalization settings", error);
   }
-}
+};
 
 const fetchProfile = async (): Promise<ProfileSnapshot | null> => {
   const {
     data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return null
+  } = await supabase.auth.getUser();
+  if (!user) return null;
   const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .maybeSingle()
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .maybeSingle();
   if (error) {
-    console.error('Failed to load profile', error)
-    return null
+    console.error("Failed to load profile", error);
+    return null;
   }
 
   if (data) {
-    const rawProfile = data as Record<string, any>
+    const rawProfile = data as Record<string, any>;
     const fallbackTimezone =
-      Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC'
+      Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
     const profile: ProfileSnapshot = {
       id: (rawProfile.id as string) ?? user.id,
       timezone:
-        typeof rawProfile.timezone === 'string' && rawProfile.timezone.length > 0
+        typeof rawProfile.timezone === "string" &&
+        rawProfile.timezone.length > 0
           ? rawProfile.timezone
           : fallbackTimezone,
       onboarding_completed: Boolean(rawProfile.onboarding_completed),
       updated_at: (rawProfile.updated_at as string | null) ?? nowIso(),
-    }
-    return profile
+    };
+    return profile;
   }
 
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC'
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
   const newProfile: ProfileSnapshot = {
     id: user.id,
     timezone,
     onboarding_completed: false,
     updated_at: nowIso(),
-  }
+  };
 
   const insertPayload: Record<string, any> = {
     id: user.id,
+    email: user.email,
     timezone,
     onboarding_completed: false,
-  }
+  };
 
   const { error: insertError } = await supabase
-    .from('profiles')
-    .insert(insertPayload)
+    .from("profiles")
+    .upsert(insertPayload, {
+      onConflict: "id",
+      ignoreDuplicates: false,
+    });
 
   if (insertError) {
-    if (insertError.code === '42703') {
-      const fallbackPayload = { ...insertPayload }
-      delete fallbackPayload.timezone
+    if (insertError.code === "42703") {
+      const fallbackPayload = { ...insertPayload };
+      delete fallbackPayload.timezone;
       const { error: fallbackError } = await supabase
-        .from('profiles')
-        .insert(fallbackPayload)
+        .from("profiles")
+        .upsert(fallbackPayload, {
+          onConflict: "id",
+          ignoreDuplicates: false,
+        });
       if (fallbackError) {
-        console.error('Failed to initialize profile without timezone column', fallbackError)
+        console.error(
+          "Failed to initialize profile without timezone column",
+          fallbackError
+        );
       }
     } else {
-      console.error('Failed to initialize profile', insertError)
+      console.error("Failed to initialize profile", insertError);
     }
   }
-  return newProfile
-}
+  return newProfile;
+};
 
 const fetchSettings = async (): Promise<UserSettings | null> => {
   const {
     data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return null
+  } = await supabase.auth.getUser();
+  if (!user) return null;
   const { data, error } = await supabase
-    .from('user_settings')
-    .select('*')
-    .eq('user_id', user.id)
-    .maybeSingle()
+    .from("user_settings")
+    .select("*")
+    .eq("user_id", user.id)
+    .maybeSingle();
   if (error) {
-    console.error('Failed to load personalization settings', error)
-    return null
+    console.error("Failed to load personalization settings", error);
+    return null;
   }
-  if (!data) return null
-  return data as UserSettings
-}
+  if (!data) return null;
+  return data as UserSettings;
+};
 
-export const fetchPersonalizationBundle = async (): Promise<PersonalizationBundle | null> => {
-  const profile = await fetchProfile()
-  if (!profile) return null
-  const cachedSettings = await loadCachedSettings()
-  const remoteSettings = await fetchSettings()
+export const fetchPersonalizationBundle =
+  async (): Promise<PersonalizationBundle | null> => {
+    const profile = await fetchProfile();
+    if (!profile) return null;
+    const cachedSettings = await loadCachedSettings();
+    const remoteSettings = await fetchSettings();
 
-  let merged = remoteSettings ?? cachedSettings ?? null
+    let merged = remoteSettings ?? cachedSettings ?? null;
 
-  if (remoteSettings && cachedSettings) {
-    const remoteUpdated = parseIsoDate(remoteSettings.updated_at)
-    const localUpdated = parseIsoDate(cachedSettings.updated_at)
-    merged = remoteUpdated >= localUpdated ? remoteSettings : cachedSettings
-  }
-
-  if (merged) {
-    const enriched: UserSettings = {
-      ...merged,
-      updated_at: merged.updated_at ?? nowIso(),
+    if (remoteSettings && cachedSettings) {
+      const remoteUpdated = parseIsoDate(remoteSettings.updated_at);
+      const localUpdated = parseIsoDate(cachedSettings.updated_at);
+      merged = remoteUpdated >= localUpdated ? remoteSettings : cachedSettings;
     }
-    await storeCachedSettings(enriched)
-    return { profile, settings: enriched }
-  }
 
-  return { profile, settings: null }
-}
+    if (merged) {
+      const enriched: UserSettings = {
+        ...merged,
+        updated_at: merged.updated_at ?? nowIso(),
+      };
+      await storeCachedSettings(enriched);
+      return { profile, settings: enriched };
+    }
+
+    return { profile, settings: null };
+  };
 
 interface PersistOptions {
-  profileTimezone: string
-  onboardingCompleted: boolean
-  rationale: string
-  source: PersonaSignalPayload['source']
+  profileTimezone: string;
+  onboardingCompleted: boolean;
+  rationale: string;
+  source: PersonaSignalPayload["source"];
 }
 
 export const persistPersonalization = async (
@@ -171,116 +183,133 @@ export const persistPersonalization = async (
 ): Promise<PersonaTag> => {
   const {
     data: { user },
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser();
   if (!user) {
-    throw new Error('User not authenticated')
+    throw new Error("User not authenticated");
   }
 
-  const personaTag = computePersonaTag(state)
+  const personaTag = computePersonaTag(state);
+
+  // Create a clean state object without custom_goals
+  const cleanState = { ...state };
+  delete (cleanState as any).custom_goals;
 
   const payload: UserSettings = {
-    ...state,
+    ...cleanState,
     persona_tag: personaTag,
     updated_at: nowIso(),
     user_id: user.id,
-  }
+  };
 
   const { error: settingsError } = await supabase
-    .from('user_settings')
-    .upsert(payload, { onConflict: 'user_id' })
+    .from("user_settings")
+    .upsert(payload, { onConflict: "user_id" });
   if (settingsError) {
-    console.error('Failed to upsert user settings', settingsError)
-    throw settingsError
+    console.error("Failed to upsert user settings", settingsError);
+    throw settingsError;
   }
 
   const profileUpdatePayload: Record<string, any> = {
     timezone: options.profileTimezone,
     onboarding_completed: options.onboardingCompleted,
     updated_at: nowIso(),
-  }
+  };
 
   const { error: profileError } = await supabase
-    .from('profiles')
+    .from("profiles")
     .update(profileUpdatePayload)
-    .eq('id', user.id)
+    .eq("id", user.id);
 
   if (profileError) {
-    if (profileError.code === '42703') {
-      const fallbackPayload = { ...profileUpdatePayload }
-      delete fallbackPayload.timezone
+    if (profileError.code === "42703") {
+      const fallbackPayload = { ...profileUpdatePayload };
+      delete fallbackPayload.timezone;
       const { error: fallbackError } = await supabase
-        .from('profiles')
+        .from("profiles")
         .update(fallbackPayload)
-        .eq('id', user.id)
+        .eq("id", user.id);
       if (fallbackError) {
-        console.error('Failed to update profile without timezone column', fallbackError)
-        throw fallbackError
+        console.error(
+          "Failed to update profile without timezone column",
+          fallbackError
+        );
+        throw fallbackError;
       }
     } else {
-      console.error('Failed to update profile', profileError)
-      throw profileError
+      console.error("Failed to update profile", profileError);
+      throw profileError;
     }
   }
 
-  await storeCachedSettings(payload)
+  await storeCachedSettings(payload);
 
   const signal: PersonaSignalPayload = {
     source: options.source,
     rationale: options.rationale,
     changes: payload,
-  }
+  };
 
   try {
-    await supabase.from('persona_signals').insert({
+    await supabase.from("persona_signals").insert({
       user_id: user.id,
       source: signal.source,
       rationale: signal.rationale,
       payload: signal,
-    })
+    });
   } catch (error) {
-    console.warn('Unable to record persona signal, caching for later', error)
+    console.warn("Unable to record persona signal, caching for later", error);
     try {
-      const raw = await AsyncStorage.getItem('@reflectify:persona_queue')
-      const queue = raw ? JSON.parse(raw) : []
-      queue.push({ rationale: signal.rationale, payload: signal, created_at: nowIso() })
-      await AsyncStorage.setItem('@reflectify:persona_queue', JSON.stringify(queue))
+      const raw = await AsyncStorage.getItem("@reflectify:persona_queue");
+      const queue = raw ? JSON.parse(raw) : [];
+      queue.push({
+        rationale: signal.rationale,
+        payload: signal,
+        created_at: nowIso(),
+      });
+      await AsyncStorage.setItem(
+        "@reflectify:persona_queue",
+        JSON.stringify(queue)
+      );
     } catch (storageError) {
-      console.error('Failed to cache persona signal', storageError)
+      console.error("Failed to cache persona signal", storageError);
     }
   }
 
-  return personaTag
-}
+  return personaTag;
+};
 
 export const exportPersonalization = async (): Promise<string> => {
-  const data = await fetchPersonalizationBundle()
-  return JSON.stringify(data, null, 2)
-}
+  const data = await fetchPersonalizationBundle();
+  return JSON.stringify(data, null, 2);
+};
 
 export const resetPersonalization = async () => {
   try {
     const {
       data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) return
-    await supabase.from('user_settings').delete().eq('user_id', user.id)
-    await AsyncStorage.removeItem(CACHE_KEY)
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from("user_settings").delete().eq("user_id", user.id);
+    await AsyncStorage.removeItem(CACHE_KEY);
   } catch (error) {
-    console.error('Failed to reset personalization data', error)
+    console.error("Failed to reset personalization data", error);
   }
-}
+};
 
 export const deletePersonalization = async () => {
   try {
     const {
       data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) return
-    await supabase.from('persona_signals').delete().eq('user_id', user.id)
-    await supabase.from('user_settings').delete().eq('user_id', user.id)
-    await supabase.from('profiles').update({ onboarding_completed: false }).eq('id', user.id)
-    await AsyncStorage.removeItem(CACHE_KEY)
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from("persona_signals").delete().eq("user_id", user.id);
+    await supabase.from("user_settings").delete().eq("user_id", user.id);
+    await supabase
+      .from("profiles")
+      .update({ onboarding_completed: false })
+      .eq("id", user.id);
+    await AsyncStorage.removeItem(CACHE_KEY);
   } catch (error) {
-    console.error('Failed to delete personalization data', error)
+    console.error("Failed to delete personalization data", error);
   }
-}
+};

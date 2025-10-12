@@ -53,6 +53,7 @@ const defaultState: PersonalizationState = {
   cadence: "daily",
   goals: [],
   extra_goal: null,
+  // custom_goals: [],
   learning_style: { visual: 5, auditory: 5, kinesthetic: 5 },
   session_length_minutes: 25,
   spiritual_prompts: false,
@@ -172,6 +173,10 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
             mode={mode}
             extraGoal={state.extra_goal ?? ""}
             onExtraGoalChange={(value) => handleUpdate({ extra_goal: value })}
+            // customGoals={state.custom_goals}
+            // onCustomGoalsChange={(goals) =>
+            //   handleUpdate({ custom_goals: goals })
+            // }
           />
         );
       case 3:
@@ -243,13 +248,16 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
             />
           </View>
         </View>
-        <Text style={styles.title}>Get to know you</Text>
+        <Text style={styles.title}>Personalize Riflett</Text>
       </View>
 
       <ScrollView
+        style={styles.scrollView}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        bounces={true}
+        alwaysBounceVertical={false}
       >
         {stepContent()}
       </ScrollView>
@@ -369,11 +377,13 @@ const createStyles = (colors: any) =>
       fontWeight: "700",
       letterSpacing: -0.5,
     },
-    content: {
+    scrollView: {
       flex: 1,
+    },
+    content: {
       paddingHorizontal: spacing.lg,
       paddingTop: spacing.lg,
-      paddingBottom: spacing.xl,
+      paddingBottom: spacing.xl + spacing.xl,
     },
     footer: {
       paddingHorizontal: spacing.lg,

@@ -27,6 +27,7 @@ interface MenuModalProps {
   session: Session;
   gestureProgress?: number;
   menuState?: ReturnType<typeof useMenuState>;
+  onSettingsPress?: () => void;
 }
 
 const ENTRY_TYPE_LABELS: Record<string, string> = {
@@ -41,6 +42,7 @@ const MenuModal: React.FC<MenuModalProps> = ({
   session,
   gestureProgress = 1,
   menuState: passedMenuState,
+  onSettingsPress,
 }) => {
   const { themeMode } = useTheme();
   const colors = getColors(themeMode);
@@ -267,7 +269,13 @@ const MenuModal: React.FC<MenuModalProps> = ({
                   <View style={styles.footer}>
                     <TouchableOpacity
                       style={styles.footerSettingsButton}
-                      onPress={() => setShowSettings(true)}
+                      onPress={() => {
+                        if (onSettingsPress) {
+                          onSettingsPress();
+                        } else {
+                          setShowSettings(true);
+                        }
+                      }}
                     >
                       <Ionicons
                         name="settings-outline"
@@ -283,11 +291,13 @@ const MenuModal: React.FC<MenuModalProps> = ({
         </Pressable>
       )}
 
-      <SettingsModal
-        visible={showSettings}
-        onClose={() => setShowSettings(false)}
-        session={session}
-      />
+      {!onSettingsPress && (
+        <SettingsModal
+          visible={showSettings}
+          onClose={() => setShowSettings(false)}
+          session={session}
+        />
+      )}
     </Modal>
   );
 };
@@ -312,10 +322,10 @@ const createStyles = (colors: any) =>
       alignItems: "center",
       paddingHorizontal: spacing.md,
       paddingTop: spacing.lg,
-      paddingBottom: spacing.lg,
+      paddingBottom: spacing.sm,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
-      minHeight: 60,
+      minHeight: 80,
     },
     sidebar: {
       width: 300,
@@ -340,8 +350,8 @@ const createStyles = (colors: any) =>
       alignItems: "center",
       paddingHorizontal: spacing.md,
       paddingTop: spacing.lg,
-      paddingBottom: spacing.lg,
-      minHeight: 60,
+      paddingBottom: spacing.sm,
+      minHeight: 80,
     },
     modalTitle: {
       fontFamily: typography.heading.fontFamily,
@@ -381,10 +391,12 @@ const createStyles = (colors: any) =>
       alignItems: "center",
     },
     footerSettingsButton: {
-      width: 36,
-      height: 36,
+      width: 44,
+      height: 44,
       justifyContent: "center",
       alignItems: "center",
+      borderRadius: 8,
+      backgroundColor: "transparent",
     },
   });
 

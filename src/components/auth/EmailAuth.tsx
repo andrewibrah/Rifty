@@ -48,10 +48,12 @@ export default function EmailAuth({
             value={email}
             onChangeText={onEmailChange}
             placeholder="email@address.com"
-            placeholderTextColor={colors.textTertiary}
+            autoComplete="email"
+            textContentType="emailAddress"
+            keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
-            keyboardType="email-address"
+            placeholderTextColor={colors.textTertiary}
             editable={!loading}
           />
         </View>
@@ -65,6 +67,8 @@ export default function EmailAuth({
             placeholder="••••••••••••••••••••••••"
             placeholderTextColor={colors.textTertiary}
             secureTextEntry
+            autoComplete="password"
+            textContentType="password"
             autoCapitalize="none"
             autoCorrect={false}
             editable={!loading}

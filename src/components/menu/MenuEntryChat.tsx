@@ -13,6 +13,8 @@ import {
   Platform,
   Pressable,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Annotation } from "../../types/annotations";
 import type { RemoteJournalEntry, EntryType } from "../../services/data";
 import { appendMessage } from "../../services/data";
@@ -49,8 +51,9 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
   onClearAIChat,
 }) => {
   const { themeMode } = useTheme();
+  const insets = useSafeAreaInsets();
   const colors = getColors(themeMode);
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createStyles(colors, insets), [colors, insets]);
   const [composerMode, setComposerMode] = useState<ComposerMode>("note");
   const [composerText, setComposerText] = useState("");
   const [isSavingNote, setIsSavingNote] = useState(false);
@@ -449,57 +452,53 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
             </Text>
           </TouchableOpacity>
         </View>
-        <TextInput
-          style={styles.noteInput}
-          value={composerText}
-          onChangeText={setComposerText}
-          placeholder={
-            composerMode === "ai"
-              ? "Ask Riflett for insight..."
-              : "Add an update..."
-          }
-          placeholderTextColor="rgba(244,244,244,0.6)"
-          multiline
-        />
-        <TouchableOpacity
-          style={[
-            styles.noteSendButton,
-            ((composerMode === "note" && disableNoteSend) ||
-              (composerMode === "ai" && disableAISend)) &&
-              styles.noteSendButtonDisabled,
-          ]}
-          onPress={composerMode === "note" ? handleAddNote : handleAskAI}
-          disabled={composerMode === "note" ? disableNoteSend : disableAISend}
-        >
-          <Text
+        <View style={styles.inputRow}>
+          <TextInput
+            style={styles.noteInput}
+            value={composerText}
+            onChangeText={setComposerText}
+            placeholder={
+              composerMode === "ai"
+                ? "Ask Riflett for insight..."
+                : "Add an update..."
+            }
+            placeholderTextColor="rgba(244,244,244,0.6)"
+            multiline
+          />
+          <TouchableOpacity
             style={[
-              styles.noteSendButtonText,
+              styles.noteSendButton,
               ((composerMode === "note" && disableNoteSend) ||
                 (composerMode === "ai" && disableAISend)) &&
-                styles.noteSendButtonTextDisabled,
+                styles.noteSendButtonDisabled,
             ]}
+            onPress={composerMode === "note" ? handleAddNote : handleAskAI}
+            disabled={composerMode === "note" ? disableNoteSend : disableAISend}
           >
-            {composerMode === "ai"
-              ? isWorkingWithAI
-                ? "Contacting..."
-                : "Ask AI"
-              : isSavingNote
-                ? "Saving"
-                : "Send"}
-          </Text>
-        </TouchableOpacity>
+            <Ionicons
+              name="arrow-up"
+              size={20}
+              color={
+                (composerMode === "note" && disableNoteSend) ||
+                (composerMode === "ai" && disableAISend)
+                  ? colors.textTertiary
+                  : colors.textPrimary
+              }
+            />
+          </TouchableOpacity>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
 };
 
-const createStyles = (colors: any) =>
+const createStyles = (colors: any, insets: any) =>
   StyleSheet.create({
     container: {
       flex: 1,
       backgroundColor: colors.background,
       paddingHorizontal: spacing.lg,
-      paddingBottom: spacing.lg,
+      paddingBottom: Math.max(spacing.xl, insets.bottom + spacing.md), // Use safe area bottom inset with more padding
     },
     scrollContainer: {
       flex: 1,
@@ -691,7 +690,11 @@ const createStyles = (colors: any) =>
     noteInputRow: {
       borderTopWidth: 1,
       borderTopColor: colors.border,
-      paddingTop: spacing.md,
+      paddingTop: spacing.lg,
+    },
+    inputRow: {
+      flexDirection: "row",
+      alignItems: "flex-end",
     },
     modeSwitcher: {
       flexDirection: "row",
@@ -724,12 +727,13 @@ const createStyles = (colors: any) =>
       fontWeight: "700" as const,
     },
     noteInput: {
-      minHeight: 44,
+      flex: 1,
+      minHeight: 52,
       maxHeight: 120,
       borderRadius: radii.md,
       backgroundColor: colors.surface,
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.md,
+      paddingVertical: spacing.md + 2,
       fontFamily: typography.body.fontFamily,
       fontWeight: typography.body.fontWeight,
       letterSpacing: typography.body.letterSpacing,
@@ -737,33 +741,22 @@ const createStyles = (colors: any) =>
       color: colors.textPrimary,
       borderWidth: 1,
       borderColor: colors.border,
-      marginBottom: spacing.sm,
+      marginRight: spacing.sm,
     },
     noteSendButton: {
       backgroundColor: colors.accent,
       borderRadius: radii.md,
-      paddingVertical: spacing.sm + 2,
-      paddingHorizontal: spacing.lg,
+      width: 52,
+      height: 52,
       borderWidth: 1,
       borderColor: colors.accent,
-      alignSelf: "flex-end",
-      minHeight: 44,
       justifyContent: "center",
+      alignItems: "center",
       ...shadows.glass,
     },
     noteSendButtonDisabled: {
       borderColor: colors.borderLight,
       backgroundColor: colors.surface,
-    },
-    noteSendButtonText: {
-      fontFamily: typography.button.fontFamily,
-      letterSpacing: typography.button.letterSpacing,
-      fontSize: 15,
-      fontWeight: "700" as const,
-      color: colors.textPrimary,
-    },
-    noteSendButtonTextDisabled: {
-      color: colors.textTertiary,
     },
   });
 

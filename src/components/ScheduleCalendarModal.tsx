@@ -165,19 +165,13 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
     setSelectedDate(day);
   }, []);
 
-  const handleChangeWeek = useCallback(
-    (direction: -1 | 1) => {
-      setCurrentCursor((prev) => addDays(prev, direction * 7));
-    },
-    []
-  );
+  const handleChangeWeek = useCallback((direction: -1 | 1) => {
+    setCurrentCursor((prev) => addDays(prev, direction * 7));
+  }, []);
 
-  const handleChangeMonth = useCallback(
-    (direction: -1 | 1) => {
-      setCurrentCursor((prev) => addMonths(prev, direction));
-    },
-    []
-  );
+  const handleChangeMonth = useCallback((direction: -1 | 1) => {
+    setCurrentCursor((prev) => addMonths(prev, direction));
+  }, []);
 
   const selectedDateKey = formatDateKey(selectedDate);
   const itinerary = scheduleByDate[selectedDateKey] ?? [];
@@ -216,7 +210,12 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
   const monthDays = useMemo(() => buildMonth(currentCursor), [currentCursor]);
 
   return (
-    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="fade"
+      transparent
+      onRequestClose={onClose}
+    >
       <View style={styles.backdrop}>
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.headerRow}>
@@ -229,7 +228,10 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
           <View style={styles.viewToggleRow}>
             <View style={styles.viewSelector}>
               <TouchableOpacity
-                style={[styles.viewToggleButton, viewMode === "week" && styles.viewToggleActive]}
+                style={[
+                  styles.viewToggleButton,
+                  viewMode === "week" && styles.viewToggleActive,
+                ]}
                 onPress={() => setViewMode("week")}
               >
                 <Text
@@ -242,7 +244,10 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.viewToggleButton, viewMode === "month" && styles.viewToggleActive]}
+                style={[
+                  styles.viewToggleButton,
+                  viewMode === "month" && styles.viewToggleActive,
+                ]}
                 onPress={() => setViewMode("month")}
               >
                 <Text
@@ -270,7 +275,9 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
             <View style={styles.calendarHeader}>
               <TouchableOpacity
                 onPress={() =>
-                  viewMode === "week" ? handleChangeWeek(-1) : handleChangeMonth(-1)
+                  viewMode === "week"
+                    ? handleChangeWeek(-1)
+                    : handleChangeMonth(-1)
                 }
                 style={styles.arrowButton}
               >
@@ -287,7 +294,9 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
               </Text>
               <TouchableOpacity
                 onPress={() =>
-                  viewMode === "week" ? handleChangeWeek(1) : handleChangeMonth(1)
+                  viewMode === "week"
+                    ? handleChangeWeek(1)
+                    : handleChangeMonth(1)
                 }
                 style={styles.arrowButton}
               >
@@ -313,13 +322,20 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
               </View>
             ) : (
               <View style={styles.monthGrid}>
-                {monthDays.map((day) => renderDayCell(day, day.getMonth() === currentCursor.getMonth()))}
+                {monthDays.map((day) =>
+                  renderDayCell(
+                    day,
+                    day.getMonth() === currentCursor.getMonth()
+                  )
+                )}
               </View>
             )}
           </View>
 
           <ScrollView style={styles.detailsContainer}>
-            <Text style={styles.detailsHeading}>{formatReadableDate(selectedDate)}</Text>
+            <Text style={styles.detailsHeading}>
+              {formatReadableDate(selectedDate)}
+            </Text>
 
             {loading ? (
               <View style={styles.loadingState}>
@@ -344,7 +360,9 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
                     </Text>
                   ) : (
                     itinerary.map((entry) => {
-                      const { place, time, reason } = parseScheduleContent(entry.content);
+                      const { place, time, reason } = parseScheduleContent(
+                        entry.content
+                      );
                       return (
                         <View key={entry.id} style={styles.scheduleCard}>
                           <View style={styles.scheduleRow}>
@@ -363,7 +381,9 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
                               size={16}
                               color={colors.textSecondary}
                             />
-                            <Text style={styles.scheduleValue}>{time || "Add a time"}</Text>
+                            <Text style={styles.scheduleValue}>
+                              {time || "Add a time"}
+                            </Text>
                           </View>
                           <View style={styles.scheduleRow}>
                             <Ionicons
@@ -405,7 +425,9 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
                               ? "Journal"
                               : "Schedule"}
                         </Text>
-                        <Text style={styles.reflectionContent}>{entry.content}</Text>
+                        <Text style={styles.reflectionContent}>
+                          {entry.content}
+                        </Text>
                       </View>
                     ))
                   )}

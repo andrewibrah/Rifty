@@ -1,22 +1,47 @@
-import React from 'react'
-import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native'
-import { getColors, spacing, radii, typography } from '../../../theme'
-import { useTheme } from '../../../contexts/ThemeContext'
-import type { PersonalizationMode, ReflectionCadence } from '../../../types/personalization'
+import React from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+} from "react-native";
+import { getColors, spacing, radii, typography } from "../../../theme";
+import { useTheme } from "../../../contexts/ThemeContext";
+import type {
+  PersonalizationMode,
+  ReflectionCadence,
+} from "../../../types/personalization";
 
 interface IdentityStepProps {
-  timezone: string
-  cadence: ReflectionCadence
-  mode: PersonalizationMode
-  onTimezoneChange: (value: string) => void
-  onCadenceChange: (value: ReflectionCadence) => void
+  timezone: string;
+  cadence: ReflectionCadence;
+  mode: PersonalizationMode;
+  onTimezoneChange: (value: string) => void;
+  onCadenceChange: (value: ReflectionCadence) => void;
 }
 
-const cadenceOptions: { label: string; value: ReflectionCadence; description: string }[] = [
-  { label: 'None', value: 'none', description: 'I will share whenever it feels right.' },
-  { label: 'Daily', value: 'daily', description: 'Brief daily check-ins keep me grounded.' },
-  { label: 'Weekly', value: 'weekly', description: 'One focused session each week.' },
-]
+const cadenceOptions: {
+  label: string;
+  value: ReflectionCadence;
+  description: string;
+}[] = [
+  {
+    label: "None",
+    value: "none",
+    description: "I will share whenever it feels right.",
+  },
+  {
+    label: "Daily",
+    value: "daily",
+    description: "Brief daily check-ins keep me grounded.",
+  },
+  {
+    label: "Weekly",
+    value: "weekly",
+    description: "One focused session each week.",
+  },
+];
 
 const IdentityStep: React.FC<IdentityStepProps> = ({
   timezone,
@@ -25,15 +50,15 @@ const IdentityStep: React.FC<IdentityStepProps> = ({
   onTimezoneChange,
   onCadenceChange,
 }) => {
-  const { themeMode } = useTheme()
-  const colors = getColors(themeMode)
-  const styles = createStyles(colors)
+  const { themeMode } = useTheme();
+  const colors = getColors(themeMode);
+  const styles = createStyles(colors);
 
   return (
     <View>
-      <Text style={styles.heading}>Identity & rhythm</Text>
+      <Text style={styles.heading}>Identity & Rhythm</Text>
       <Text style={styles.body}>
-        Tell Reflectify who is speaking and how often you want gentle check-ins.
+        Tell Riflett who is speaking and how often you want gentle check-ins.
       </Text>
 
       <View style={styles.card}>
@@ -46,7 +71,9 @@ const IdentityStep: React.FC<IdentityStepProps> = ({
           editable={false}
           value="Linked to your account"
         />
-        <Text style={styles.helper}>Display name syncs from your auth profile.</Text>
+        <Text style={styles.helper}>
+          Display name syncs from your auth profile.
+        </Text>
       </View>
 
       <View style={styles.card}>
@@ -59,13 +86,15 @@ const IdentityStep: React.FC<IdentityStepProps> = ({
           placeholderTextColor={colors.textTertiary}
           accessibilityLabel="Timezone"
         />
-        <Text style={styles.helper}>Detected automatically—adjust if needed.</Text>
+        <Text style={styles.helper}>
+          Detected automatically—adjust if needed.
+        </Text>
       </View>
 
       <View style={styles.card}>
         <Text style={styles.label}>Reflection cadence</Text>
         {cadenceOptions.map((option) => {
-          const active = cadence === option.value
+          const active = cadence === option.value;
           return (
             <TouchableOpacity
               key={option.value}
@@ -74,27 +103,36 @@ const IdentityStep: React.FC<IdentityStepProps> = ({
               accessibilityRole="radio"
               accessibilityState={{ selected: active }}
             >
-              <Text style={[styles.cadenceLabel, active && styles.cadenceLabelActive]}>
+              <Text
+                style={[
+                  styles.cadenceLabel,
+                  active && styles.cadenceLabelActive,
+                ]}
+              >
                 {option.label}
               </Text>
-              <Text style={styles.cadenceDescription}>{option.description}</Text>
+              <Text style={styles.cadenceDescription}>
+                {option.description}
+              </Text>
             </TouchableOpacity>
-          )
+          );
         })}
-        {mode === 'basic' && (
-          <Text style={styles.helper}>Basic mode keeps cadence flexible—you can adjust later.</Text>
+        {mode === "basic" && (
+          <Text style={styles.helper}>
+            Basic mode keeps cadence flexible—you can adjust later.
+          </Text>
         )}
       </View>
     </View>
-  )
-}
+  );
+};
 
 const createStyles = (colors: any) =>
   StyleSheet.create({
     heading: {
       fontFamily: typography.title.fontFamily,
       fontSize: 20,
-      fontWeight: '700',
+      fontWeight: "700",
       color: colors.textPrimary,
       marginBottom: spacing.sm,
     },
@@ -106,12 +144,12 @@ const createStyles = (colors: any) =>
       marginBottom: spacing.md,
     },
     card: {
-      borderRadius: radii.lg,
-      borderWidth: 1,
-      borderColor: colors.border,
       backgroundColor: colors.surface,
       padding: spacing.md,
       marginBottom: spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      borderRadius: radii.md,
     },
     label: {
       fontFamily: typography.title.fontFamily,
@@ -120,15 +158,15 @@ const createStyles = (colors: any) =>
       marginBottom: spacing.xs,
     },
     input: {
-      backgroundColor: colors.surface,
-      borderRadius: radii.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      paddingHorizontal: spacing.md,
+      backgroundColor: colors.background,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      paddingHorizontal: 0,
       paddingVertical: spacing.sm,
       fontFamily: typography.body.fontFamily,
       color: colors.textPrimary,
       fontSize: 15,
+      borderRadius: radii.sm,
     },
     helper: {
       fontFamily: typography.caption.fontFamily,
@@ -137,19 +175,22 @@ const createStyles = (colors: any) =>
       marginTop: spacing.xs,
     },
     cadenceChip: {
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: radii.md,
-      padding: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.sm,
       marginBottom: spacing.sm,
+      backgroundColor: colors.background,
+      borderRadius: radii.sm,
     },
     cadenceChipActive: {
-      borderColor: colors.accent,
-      backgroundColor: colors.surface,
+      borderBottomColor: colors.accent,
+      backgroundColor: colors.surfaceElevated,
+      borderRadius: radii.sm,
     },
     cadenceLabel: {
       fontFamily: typography.body.fontFamily,
-      fontWeight: '600',
+      fontWeight: "600",
       color: colors.textSecondary,
       fontSize: 14,
     },
@@ -162,6 +203,6 @@ const createStyles = (colors: any) =>
       color: colors.textTertiary,
       fontSize: 12,
     },
-  })
+  });
 
-export default IdentityStep
+export default IdentityStep;

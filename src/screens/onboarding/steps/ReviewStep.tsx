@@ -20,7 +20,7 @@ const ReviewStep: React.FC<ReviewStepProps> = ({ state, timezone, confirmed, onC
     <View>
       <Text style={styles.heading}>Review & confirm</Text>
       <Text style={styles.body}>
-        Here is the context Reflectify will keep. You can edit or export everything later
+        Here is the context Riflett will keep. You can edit or export everything later
         in Settings → Personalization.
       </Text>
 
