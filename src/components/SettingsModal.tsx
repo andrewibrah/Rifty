@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
 import { getColors, radii, spacing, typography } from "../theme";
@@ -31,67 +31,113 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       transparent
       onRequestClose={onClose}
     >
-      <View style={styles.overlay}>
-        <SafeAreaView style={styles.modalCard}>
-          <View style={styles.modalHeader}>
-            <View style={styles.headerButtonPlaceholder} />
-            <Text style={styles.modalTitle}>Settings</Text>
-            <TouchableOpacity onPress={onClose} style={styles.headerButton}>
-              <Ionicons
-                name="arrow-back-outline"
-                size={20}
-                color={colors.textPrimary}
-              />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.content}>
-            {/* Account Section */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Account</Text>
-              <View style={styles.accountCard}>
-                <View style={styles.accountIconContainer}>
-                  <Ionicons
-                    name="person-outline"
-                    size={20}
-                    color={colors.accent}
-                  />
-                </View>
-                <View style={styles.accountInfo}>
-                  <Text style={styles.accountLabel}>Email</Text>
-                  <Text style={styles.accountEmail}>
-                    {session?.user?.email}
-                  </Text>
-                </View>
-              </View>
+      <SafeAreaProvider>
+        <View style={styles.overlay}>
+          <SafeAreaView
+            style={styles.modalCard}
+            edges={["top", "bottom", "left", "right"]}
+          >
+            <View style={styles.modalHeader}>
+              <View style={styles.headerButtonPlaceholder} />
+              <Text style={styles.modalTitle}>Settings</Text>
+              <TouchableOpacity onPress={onClose} style={styles.headerButton}>
+                <Ionicons
+                  name="arrow-back-outline"
+                  size={20}
+                  color={colors.textPrimary}
+                />
+              </TouchableOpacity>
             </View>
 
-            {/* Personalization Button */}
-            {onPersonalizationPress && (
+            <View style={styles.content}>
+              {/* Account Section */}
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Profile</Text>
-                <TouchableOpacity
-                  style={[
-                    styles.personalizationButton,
-                    { borderLeftColor: colors.accent, borderLeftWidth: 2 },
-                  ]}
-                  onPress={() => {
-                    onPersonalizationPress();
-                  }}
-                >
-                  <View style={styles.personalizationIconContainer}>
+                <Text style={styles.sectionTitle}>Account</Text>
+                <View style={styles.accountCard}>
+                  <View style={styles.accountIconContainer}>
                     <Ionicons
-                      name="person-circle-outline"
+                      name="person-outline"
                       size={20}
                       color={colors.accent}
                     />
                   </View>
-                  <View style={styles.personalizationInfo}>
-                    <Text style={styles.personalizationLabel}>
-                      Personalization
+                  <View style={styles.accountInfo}>
+                    <Text style={styles.accountLabel}>Email</Text>
+                    <Text style={styles.accountEmail}>
+                      {session?.user?.email}
                     </Text>
-                    <Text style={styles.personalizationValue}>
-                      Goals, learning style, and preferences
+                  </View>
+                </View>
+              </View>
+
+              {/* Personalization Button */}
+              {onPersonalizationPress && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Profile</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.personalizationButton,
+                      { borderLeftColor: colors.accent, borderLeftWidth: 2 },
+                    ]}
+                    onPress={() => {
+                      onPersonalizationPress();
+                    }}
+                  >
+                    <View style={styles.personalizationIconContainer}>
+                      <Ionicons
+                        name="color-palette-outline"
+                        size={20}
+                        color={colors.accent}
+                      />
+                    </View>
+                    <View style={styles.personalizationInfo}>
+                      <Text style={styles.personalizationLabel}>
+                        Personalization
+                      </Text>
+                      <Text style={styles.personalizationValue}>
+                        Goals, learning style, and preferences
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name="chevron-forward-outline"
+                      size={16}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Color Scheme Button */}
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Appearance</Text>
+                <TouchableOpacity
+                  style={[
+                    styles.colorSchemeButton,
+                    { borderLeftColor: colors.accent, borderLeftWidth: 2 },
+                  ]}
+                  onPress={toggleTheme}
+                >
+                  <View style={styles.colorSchemeIconContainer}>
+                    <Ionicons
+                      name={
+                        isSystemTheme
+                          ? "phone-portrait-outline"
+                          : isDark
+                            ? "moon-outline"
+                            : "sunny-outline"
+                      }
+                      size={20}
+                      color={colors.accent}
+                    />
+                  </View>
+                  <View style={styles.colorSchemeInfo}>
+                    <Text style={styles.colorSchemeLabel}>Theme</Text>
+                    <Text style={styles.colorSchemeValue}>
+                      {isSystemTheme
+                        ? "System Theme"
+                        : isDark
+                          ? "Dark Mode"
+                          : "Light Mode"}
                     </Text>
                   </View>
                   <Ionicons
@@ -101,69 +147,28 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                   />
                 </TouchableOpacity>
               </View>
-            )}
 
-            {/* Color Scheme Button */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Appearance</Text>
-              <TouchableOpacity
-                style={[
-                  styles.colorSchemeButton,
-                  { borderLeftColor: colors.accent, borderLeftWidth: 2 },
-                ]}
-                onPress={toggleTheme}
-              >
-                <View style={styles.colorSchemeIconContainer}>
-                  <Ionicons
-                    name={
-                      isSystemTheme
-                        ? "phone-portrait-outline"
-                        : isDark
-                          ? "moon-outline"
-                          : "sunny-outline"
-                    }
-                    size={20}
-                    color={colors.accent}
-                  />
-                </View>
-                <View style={styles.colorSchemeInfo}>
-                  <Text style={styles.colorSchemeLabel}>Theme</Text>
-                  <Text style={styles.colorSchemeValue}>
-                    {isSystemTheme
-                      ? "System Theme"
-                      : isDark
-                        ? "Dark Mode"
-                        : "Light Mode"}
-                  </Text>
-                </View>
-                <Ionicons
-                  name="chevron-forward-outline"
-                  size={16}
-                  color={colors.textSecondary}
-                />
-              </TouchableOpacity>
+              {/* Logout Button */}
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Actions</Text>
+                <TouchableOpacity
+                  style={styles.logoutButton}
+                  onPress={() => supabase.auth.signOut()}
+                >
+                  <View style={styles.logoutIconContainer}>
+                    <Ionicons
+                      name="log-out-outline"
+                      size={18}
+                      color={colors.error}
+                    />
+                  </View>
+                  <Text style={styles.logoutButtonText}>Sign Out</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-
-            {/* Logout Button */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Actions</Text>
-              <TouchableOpacity
-                style={styles.logoutButton}
-                onPress={() => supabase.auth.signOut()}
-              >
-                <View style={styles.logoutIconContainer}>
-                  <Ionicons
-                    name="log-out-outline"
-                    size={18}
-                    color={colors.error}
-                  />
-                </View>
-                <Text style={styles.logoutButtonText}>Sign Out</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </SafeAreaView>
-      </View>
+          </SafeAreaView>
+        </View>
+      </SafeAreaProvider>
     </Modal>
   );
 };

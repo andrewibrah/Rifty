@@ -47,47 +47,75 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({
           {/* Account Section */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Account</Text>
-            <View style={styles.accountCard}>
-              <View style={styles.accountIconContainer}>
-                <Ionicons
-                  name="person-outline"
-                  size={20}
-                  color={colors.accent}
-                />
-              </View>
-              <View style={styles.accountInfo}>
-                <Text style={styles.accountLabel}>Email</Text>
-                <Text style={styles.accountEmail}>{session?.user?.email}</Text>
+            <View style={styles.settingsCard}>
+              <View style={styles.settingRow}>
+                <View style={styles.iconContainer}>
+                  <Ionicons
+                    name="person-outline"
+                    size={18}
+                    color={colors.accent}
+                  />
+                </View>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingLabel}>Email</Text>
+                  <Text style={styles.settingValue}>
+                    {session?.user?.email}
+                  </Text>
+                </View>
               </View>
             </View>
           </View>
 
-          {/* Personalization Button */}
-          {onPersonalizationPress && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Profile</Text>
-              <TouchableOpacity
-                style={[
-                  styles.personalizationButton,
-                  { borderLeftColor: colors.accent, borderLeftWidth: 2 },
-                ]}
-                onPress={() => {
-                  onPersonalizationPress();
-                }}
-              >
-                <View style={styles.personalizationIconContainer}>
+          {/* Preferences Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Preferences</Text>
+            <View style={styles.settingsCard}>
+              {onPersonalizationPress && (
+                <>
+                  <TouchableOpacity
+                    style={styles.settingRow}
+                    onPress={onPersonalizationPress}
+                  >
+                    <View style={styles.iconContainer}>
+                      <Ionicons
+                        name="color-palette-outline"
+                        size={18}
+                        color={colors.accent}
+                      />
+                    </View>
+                    <View style={styles.settingInfo}>
+                      <Text style={styles.settingLabel}>Personalization</Text>
+                      <Text style={styles.settingValue}>
+                        Goals & learning style
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name="chevron-forward-outline"
+                      size={16}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+                  <View style={styles.divider} />
+                </>
+              )}
+              <TouchableOpacity style={styles.settingRow} onPress={toggleTheme}>
+                <View style={styles.iconContainer}>
                   <Ionicons
-                    name="person-circle-outline"
-                    size={20}
+                    name={
+                      isSystemTheme
+                        ? "phone-portrait-outline"
+                        : isDark
+                          ? "moon-outline"
+                          : "sunny-outline"
+                    }
+                    size={18}
                     color={colors.accent}
                   />
                 </View>
-                <View style={styles.personalizationInfo}>
-                  <Text style={styles.personalizationLabel}>
-                    Personalization
-                  </Text>
-                  <Text style={styles.personalizationValue}>
-                    Goals, learning style, and preferences
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingLabel}>Theme</Text>
+                  <Text style={styles.settingValue}>
+                    {isSystemTheme ? "System" : isDark ? "Dark" : "Light"}
                   </Text>
                 </View>
                 <Ionicons
@@ -97,64 +125,17 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 />
               </TouchableOpacity>
             </View>
-          )}
-
-          {/* Color Scheme Button */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Appearance</Text>
-            <TouchableOpacity
-              style={[
-                styles.colorSchemeButton,
-                { borderLeftColor: colors.accent, borderLeftWidth: 2 },
-              ]}
-              onPress={toggleTheme}
-            >
-              <View style={styles.colorSchemeIconContainer}>
-                <Ionicons
-                  name={
-                    isSystemTheme
-                      ? "phone-portrait-outline"
-                      : isDark
-                        ? "moon-outline"
-                        : "sunny-outline"
-                  }
-                  size={20}
-                  color={colors.accent}
-                />
-              </View>
-              <View style={styles.colorSchemeInfo}>
-                <Text style={styles.colorSchemeLabel}>Theme</Text>
-                <Text style={styles.colorSchemeValue}>
-                  {isSystemTheme
-                    ? "System Theme"
-                    : isDark
-                      ? "Dark Mode"
-                      : "Light Mode"}
-                </Text>
-              </View>
-              <Ionicons
-                name="chevron-forward-outline"
-                size={16}
-                color={colors.textSecondary}
-              />
-            </TouchableOpacity>
           </View>
 
-          {/* Logout Button */}
+          {/* Actions Section */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Actions</Text>
             <TouchableOpacity
-              style={styles.logoutButton}
+              style={styles.dangerButton}
               onPress={() => supabase.auth.signOut()}
             >
-              <View style={styles.logoutIconContainer}>
-                <Ionicons
-                  name="log-out-outline"
-                  size={18}
-                  color={colors.error}
-                />
-              </View>
-              <Text style={styles.logoutButtonText}>Sign Out</Text>
+              <Ionicons name="log-out-outline" size={18} color={colors.error} />
+              <Text style={styles.dangerButtonText}>Sign Out</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -177,9 +158,9 @@ const createStyles = (colors: any) =>
       justifyContent: "space-between",
       alignItems: "center",
       paddingHorizontal: spacing.md,
-      paddingTop: spacing.xl,
-      paddingBottom: spacing.lg,
-      minHeight: 80,
+      paddingTop: spacing.lg,
+      paddingBottom: spacing.sm,
+      minHeight: 60,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
     },
@@ -209,153 +190,79 @@ const createStyles = (colors: any) =>
       padding: spacing.lg,
     },
     section: {
-      marginBottom: spacing.xl,
+      marginBottom: spacing.lg,
     },
     sectionTitle: {
       fontFamily: typography.button.fontFamily,
       fontWeight: typography.button.fontWeight,
-      fontSize: 12,
+      fontSize: 11,
       color: colors.textSecondary,
-      marginBottom: spacing.sm,
+      marginBottom: spacing.xs,
       marginLeft: spacing.xs,
       letterSpacing: 0.5,
       textTransform: "uppercase",
     },
-    accountCard: {
+    settingsCard: {
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      overflow: "hidden",
+    },
+    settingRow: {
       flexDirection: "row",
       alignItems: "center",
-      paddingVertical: spacing.md + spacing.xs,
       paddingHorizontal: spacing.md,
-      backgroundColor: colors.surface,
-      borderRadius: radii.md,
-      borderLeftWidth: 2,
-      borderLeftColor: "transparent",
+      paddingVertical: spacing.sm,
+      minHeight: 56,
     },
-    accountIconContainer: {
-      width: 40,
-      height: 40,
+    iconContainer: {
+      width: 32,
+      height: 32,
       borderRadius: radii.sm,
       backgroundColor: colors.surfaceElevated,
       justifyContent: "center",
       alignItems: "center",
       marginRight: spacing.md,
     },
-    accountInfo: {
+    settingInfo: {
       flex: 1,
     },
-    accountLabel: {
-      fontFamily: typography.caption.fontFamily,
-      fontWeight: typography.caption.fontWeight,
-      fontSize: 11,
-      color: colors.textSecondary,
-      marginBottom: 2,
-      letterSpacing: 0.5,
-      textTransform: "uppercase",
-    },
-    accountEmail: {
+    settingLabel: {
       fontFamily: typography.body.fontFamily,
-      fontWeight: "600" as const,
       fontSize: 15,
+      fontWeight: "500" as const,
       color: colors.textPrimary,
+      marginBottom: 2,
     },
-    personalizationButton: {
+    settingValue: {
+      fontFamily: typography.caption.fontFamily,
+      fontSize: 12,
+      color: colors.textSecondary,
+    },
+    divider: {
+      height: 1,
+      backgroundColor: colors.border,
+      marginLeft: spacing.md + 32 + spacing.md,
+    },
+    dangerButton: {
       flexDirection: "row",
       alignItems: "center",
-      paddingVertical: spacing.md + spacing.xs,
+      justifyContent: "flex-start",
+      paddingVertical: spacing.sm,
       paddingHorizontal: spacing.md,
       backgroundColor: colors.surface,
       borderRadius: radii.md,
-      borderLeftWidth: 2,
-      borderLeftColor: "transparent",
+      borderWidth: 1,
+      borderColor: colors.border,
+      minHeight: 48,
     },
-    personalizationIconContainer: {
-      width: 40,
-      height: 40,
-      borderRadius: radii.sm,
-      backgroundColor: colors.surfaceElevated,
-      justifyContent: "center",
-      alignItems: "center",
-      marginRight: spacing.md,
-    },
-    personalizationInfo: {
-      flex: 1,
-    },
-    personalizationLabel: {
-      fontFamily: typography.caption.fontFamily,
-      fontWeight: typography.caption.fontWeight,
-      fontSize: 11,
-      color: colors.textSecondary,
-      marginBottom: 2,
-      letterSpacing: 0.5,
-      textTransform: "uppercase",
-    },
-    personalizationValue: {
+    dangerButtonText: {
       fontFamily: typography.body.fontFamily,
-      fontWeight: "600" as const,
       fontSize: 15,
-      color: colors.textPrimary,
-    },
-    colorSchemeButton: {
-      flexDirection: "row",
-      alignItems: "center",
-      paddingVertical: spacing.md + spacing.xs,
-      paddingHorizontal: spacing.md,
-      backgroundColor: colors.surface,
-      borderRadius: radii.md,
-      borderLeftWidth: 2,
-      borderLeftColor: "transparent",
-    },
-    colorSchemeIconContainer: {
-      width: 40,
-      height: 40,
-      borderRadius: radii.sm,
-      backgroundColor: colors.surfaceElevated,
-      justifyContent: "center",
-      alignItems: "center",
-      marginRight: spacing.md,
-    },
-    colorSchemeInfo: {
-      flex: 1,
-    },
-    colorSchemeLabel: {
-      fontFamily: typography.caption.fontFamily,
-      fontWeight: typography.caption.fontWeight,
-      fontSize: 11,
-      color: colors.textSecondary,
-      marginBottom: 2,
-      letterSpacing: 0.5,
-      textTransform: "uppercase",
-    },
-    colorSchemeValue: {
-      fontFamily: typography.body.fontFamily,
       fontWeight: "600" as const,
-      fontSize: 15,
-      color: colors.textPrimary,
-    },
-    logoutButton: {
-      flexDirection: "row",
-      alignItems: "center",
-      paddingVertical: spacing.md + spacing.xs,
-      paddingHorizontal: spacing.md,
-      backgroundColor: colors.surface,
-      borderRadius: radii.md,
-      borderLeftWidth: 2,
-      borderLeftColor: colors.error,
-    },
-    logoutIconContainer: {
-      width: 40,
-      height: 40,
-      borderRadius: radii.sm,
-      backgroundColor: colors.surfaceElevated,
-      justifyContent: "center",
-      alignItems: "center",
-      marginRight: spacing.md,
-    },
-    logoutButtonText: {
-      fontFamily: typography.body.fontFamily,
-      fontWeight: "600" as const,
-      fontSize: 15,
-      color: colors.textPrimary,
+      color: colors.error,
+      marginLeft: spacing.sm,
     },
   });
 

@@ -8,7 +8,7 @@ import {
   Pressable,
   StyleSheet,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import type { Session } from "@supabase/supabase-js";
 import { Alert } from "react-native";
@@ -152,152 +152,164 @@ const MenuModal: React.FC<MenuModalProps> = ({
       transparent
       onRequestClose={onClose}
     >
-      {showEntryChat ? (
-        // Full screen entry chat
-        <View style={styles.fullScreenContainer}>
-          <SafeAreaView style={styles.fullScreenContent}>
-            <View style={styles.fullScreenHeader}>
-              <TouchableOpacity
-                onPress={menuState.handleBack}
-                style={styles.backButton}
-              >
-                <Ionicons
-                  name="arrow-back"
-                  size={20}
-                  color={colors.textPrimary}
-                />
-              </TouchableOpacity>
-              <Text style={styles.modalTitle}>
-                {entryChat.selectedEntry
-                  ? currentChatMode === "note"
-                    ? "Notes"
-                    : "AI Chat"
-                  : null}
-              </Text>
-              {entryChat.selectedEntry &&
-              currentChatMode === "ai" &&
-              entryChat.annotations.filter((a) => a.channel === "ai").length >
-                0 ? (
+      <SafeAreaProvider>
+        {showEntryChat ? (
+          // Full screen entry chat
+          <View style={styles.fullScreenContainer}>
+            <SafeAreaView
+              style={styles.fullScreenContent}
+              edges={["top", "bottom", "left", "right"]}
+            >
+              <View style={styles.fullScreenHeader}>
                 <TouchableOpacity
-                  onPress={handleClearAIChat}
-                  style={styles.clearButton}
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear AI chat"
+                  onPress={menuState.handleBack}
+                  style={styles.backButton}
                 >
                   <Ionicons
-                    name="create-outline"
+                    name="arrow-back"
                     size={20}
-                    color={colors.textSecondary}
+                    color={colors.textPrimary}
                   />
                 </TouchableOpacity>
-              ) : (
-                <View style={styles.headerSpacer} />
-              )}
-            </View>
-            {entryChat.selectedEntry && (
-              <MenuEntryChat
-                entry={entryChat.selectedEntry}
-                annotations={entryChat.annotations}
-                loading={entryChat.annotationsLoading}
-                error={entryChat.annotationsError}
-                onAnnotationsUpdate={entryChat.setAnnotations}
-                onAnnotationCountUpdate={handleAnnotationCountUpdate}
-                onErrorUpdate={entryChat.onErrorUpdate}
-                onModeChange={handleModeChange}
-                onRefreshAnnotations={entryChat.refreshAnnotations}
-                onClearAIChat={handleClearAIChat}
-              />
-            )}
-          </SafeAreaView>
-        </View>
-      ) : (
-        // Sidebar for categories and entries
-        <Pressable style={styles.overlay} onPress={onClose} accessible={false}>
-          <Animated.View
-            style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}
-          >
-            <Pressable
-              style={styles.sidebarPressable}
-              onPress={(e) => e.stopPropagation()}
-              accessible={false}
-            >
-              <SafeAreaView style={styles.sidebarContent}>
-                <View style={styles.modalHeader}>
-                  {!showCategories ? (
-                    <TouchableOpacity
-                      onPress={menuState.handleBack}
-                      style={styles.backButton}
-                    >
-                      <Ionicons
-                        name="arrow-back"
-                        size={20}
-                        color={colors.textPrimary}
-                      />
-                    </TouchableOpacity>
-                  ) : (
-                    <View style={styles.headerSpacer} />
-                  )}
-                  <Text style={styles.modalTitle}>
-                    {showEntries && menuState.selectedType
-                      ? `${ENTRY_TYPE_LABELS[menuState.selectedType]}`
-                      : null}
-                  </Text>
+                <Text style={styles.modalTitle}>
+                  {entryChat.selectedEntry
+                    ? currentChatMode === "note"
+                      ? "Notes"
+                      : "AI Chat"
+                    : null}
+                </Text>
+                {entryChat.selectedEntry &&
+                currentChatMode === "ai" &&
+                entryChat.annotations.filter((a) => a.channel === "ai").length >
+                  0 ? (
+                  <TouchableOpacity
+                    onPress={handleClearAIChat}
+                    style={styles.clearButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear AI chat"
+                  >
+                    <Ionicons
+                      name="create-outline"
+                      size={20}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+                ) : (
                   <View style={styles.headerSpacer} />
-                </View>
-
-                {showContent && (
-                  <MenuList
-                    mode={menuState.mode}
-                    selectedType={menuState.selectedType}
-                    entries={menuState.entries}
-                    entriesLoading={menuState.entriesLoading}
-                    entriesError={menuState.entriesError}
-                    annotationCounts={menuState.annotationCounts}
-                    entryCounts={menuState.entryCounts}
-                    onSelectType={menuState.handleSelectType}
-                    onSelectEntry={menuState.handleSelectEntry}
-                    onEntriesUpdate={(entries) => {
-                      // Update the entries in menu state
-                      // Entry counts will update automatically via useEffect
-                      (menuState as any).setEntries(entries);
-                    }}
-                  />
                 )}
-
-                {/* Footer with Settings Button */}
-                {showContent && showCategories && (
-                  <View style={styles.footer}>
-                    <TouchableOpacity
-                      style={styles.footerSettingsButton}
-                      onPress={() => {
-                        if (onSettingsPress) {
-                          onSettingsPress();
-                        } else {
-                          setShowSettings(true);
-                        }
-                      }}
-                    >
-                      <Ionicons
-                        name="settings-outline"
-                        size={20}
-                        color={colors.textSecondary}
-                      />
-                    </TouchableOpacity>
+              </View>
+              {entryChat.selectedEntry && (
+                <MenuEntryChat
+                  entry={entryChat.selectedEntry}
+                  annotations={entryChat.annotations}
+                  loading={entryChat.annotationsLoading}
+                  error={entryChat.annotationsError}
+                  onAnnotationsUpdate={entryChat.setAnnotations}
+                  onAnnotationCountUpdate={handleAnnotationCountUpdate}
+                  onErrorUpdate={entryChat.onErrorUpdate}
+                  onModeChange={handleModeChange}
+                  onRefreshAnnotations={entryChat.refreshAnnotations}
+                  onClearAIChat={handleClearAIChat}
+                />
+              )}
+            </SafeAreaView>
+          </View>
+        ) : (
+          // Sidebar for categories and entries
+          <Pressable
+            style={styles.overlay}
+            onPress={onClose}
+            accessible={false}
+          >
+            <Animated.View
+              style={[styles.sidebar, { transform: [{ translateX: slideAnim }] }]}
+            >
+              <Pressable
+                style={styles.sidebarPressable}
+                onPress={(e) => e.stopPropagation()}
+                accessible={false}
+              >
+                <SafeAreaView
+                  style={styles.sidebarContent}
+                  edges={["top", "bottom", "left", "right"]}
+                >
+                  <View style={styles.modalHeader}>
+                    {!showCategories ? (
+                      <TouchableOpacity
+                        onPress={menuState.handleBack}
+                        style={styles.backButton}
+                      >
+                        <Ionicons
+                          name="arrow-back"
+                          size={20}
+                          color={colors.textPrimary}
+                        />
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={styles.headerSpacer} />
+                    )}
+                    <Text style={styles.modalTitle}>
+                      {showEntries && menuState.selectedType
+                        ? `${ENTRY_TYPE_LABELS[menuState.selectedType]}`
+                        : null}
+                    </Text>
+                    <View style={styles.headerSpacer} />
                   </View>
-                )}
-              </SafeAreaView>
-            </Pressable>
-          </Animated.View>
-        </Pressable>
-      )}
 
-      {!onSettingsPress && (
-        <SettingsModal
-          visible={showSettings}
-          onClose={() => setShowSettings(false)}
-          session={session}
-        />
-      )}
+                  {showContent && (
+                    <MenuList
+                      mode={menuState.mode}
+                      selectedType={menuState.selectedType}
+                      entries={menuState.entries}
+                      entriesLoading={menuState.entriesLoading}
+                      entriesError={menuState.entriesError}
+                      annotationCounts={menuState.annotationCounts}
+                      entryCounts={menuState.entryCounts}
+                      onSelectType={menuState.handleSelectType}
+                      onSelectEntry={menuState.handleSelectEntry}
+                      onEntriesUpdate={(entries) => {
+                        // Update the entries in menu state
+                        // Entry counts will update automatically via useEffect
+                        (menuState as any).setEntries(entries);
+                      }}
+                    />
+                  )}
+
+                  {/* Footer with Settings Button */}
+                  {showContent && showCategories && (
+                    <View style={styles.footer}>
+                      <TouchableOpacity
+                        style={styles.footerSettingsButton}
+                        onPress={() => {
+                          if (onSettingsPress) {
+                            onSettingsPress();
+                          } else {
+                            setShowSettings(true);
+                          }
+                        }}
+                      >
+                        <Ionicons
+                          name="settings-outline"
+                          size={20}
+                          color={colors.textSecondary}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </SafeAreaView>
+              </Pressable>
+            </Animated.View>
+          </Pressable>
+        )}
+
+        {!onSettingsPress && (
+          <SettingsModal
+            visible={showSettings}
+            onClose={() => setShowSettings(false)}
+            session={session}
+          />
+        )}
+      </SafeAreaProvider>
     </Modal>
   );
 };
