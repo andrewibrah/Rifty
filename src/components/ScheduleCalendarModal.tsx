@@ -13,6 +13,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { getColors, radii, spacing, typography, shadows } from "../theme";
 import { useTheme } from "../contexts/ThemeContext";
 import { listJournals, type RemoteJournalEntry } from "../services/data";
+import MenuEntryChat from "./menu/MenuEntryChat";
+import { useEntryChat } from "../hooks/useEntryChat";
 
 interface ScheduleCalendarModalProps {
   visible: boolean;
@@ -86,9 +88,51 @@ const parseScheduleContent = (content: string) => {
   return { place, time, reason };
 };
 
+const parseDateFromString = (value?: string | null): Date | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const isoMatch = trimmed.match(/\d{4}-\d{2}-\d{2}/);
+  if (isoMatch) {
+    const date = new Date(`${isoMatch[0]}T00:00:00`);
+    if (!Number.isNaN(date.getTime())) {
+      return date;
+    }
+  }
+
+  const parsed = Date.parse(trimmed);
+  if (!Number.isNaN(parsed)) {
+    const date = new Date(parsed);
+    if (!Number.isNaN(date.getTime())) {
+      return date;
+    }
+  }
+
+  return null;
+};
+
+const resolveEntryDate = (entry: RemoteJournalEntry): Date => {
+  if (entry.type === "schedule") {
+    const metadata = (entry.metadata ?? {}) as Record<string, any>;
+    const metadataDate = parseDateFromString(metadata?.scheduled_for);
+    if (metadataDate) {
+      return metadataDate;
+    }
+
+    const { time } = parseScheduleContent(entry.content ?? "");
+    const parsed = parseDateFromString(time);
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return new Date(entry.created_at ?? Date.now());
+};
+
 const groupEntriesByDate = (entries: RemoteJournalEntry[]) => {
   return entries.reduce<EntryGroups>((acc, entry) => {
-    const key = formatDateKey(entry.created_at);
+    const key = formatDateKey(resolveEntryDate(entry));
     if (!acc[key]) {
       acc[key] = [];
     }
@@ -111,25 +155,18 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
   const [entries, setEntries] = useState<RemoteJournalEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(
+    null
+  );
 
   const scheduleEntries = useMemo(
     () => entries.filter((entry) => entry.type === "schedule"),
     [entries]
   );
 
-  const reflectionEntries = useMemo(
-    () => entries.filter((entry) => entry.type !== "schedule"),
-    [entries]
-  );
-
   const scheduleByDate = useMemo(
     () => groupEntriesByDate(scheduleEntries),
     [scheduleEntries]
-  );
-
-  const reflectionsByDate = useMemo(
-    () => groupEntriesByDate(reflectionEntries),
-    [reflectionEntries]
   );
 
   const fetchEntries = useCallback(async () => {
@@ -161,9 +198,31 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
     setCurrentCursor(selectedDate);
   }, [selectedDate, visible]);
 
-  const handleSelectDate = useCallback((day: Date) => {
-    setSelectedDate(day);
-  }, []);
+  useEffect(() => {
+    if (!visible) return;
+    const key = formatDateKey(selectedDate);
+    const entriesForDay = scheduleByDate[key] ?? [];
+    if (entriesForDay.length === 0) {
+      if (selectedScheduleId !== null) {
+        setSelectedScheduleId(null);
+      }
+      return;
+    }
+
+    if (!entriesForDay.some((entry) => entry.id === selectedScheduleId)) {
+      setSelectedScheduleId(entriesForDay[0]?.id ?? null);
+    }
+  }, [visible, selectedDate, scheduleByDate, selectedScheduleId]);
+
+  const handleSelectDate = useCallback(
+    (day: Date) => {
+      setSelectedDate(day);
+      const key = formatDateKey(day);
+      const entriesForDay = scheduleByDate[key] ?? [];
+      setSelectedScheduleId(entriesForDay[0]?.id ?? null);
+    },
+    [scheduleByDate]
+  );
 
   const handleChangeWeek = useCallback((direction: -1 | 1) => {
     setCurrentCursor((prev) => addDays(prev, direction * 7));
@@ -175,7 +234,16 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
 
   const selectedDateKey = formatDateKey(selectedDate);
   const itinerary = scheduleByDate[selectedDateKey] ?? [];
-  const reflections = reflectionsByDate[selectedDateKey] ?? [];
+
+  const {
+    selectedEntry: scheduleEntry,
+    annotations: scheduleAnnotations,
+    annotationsLoading,
+    annotationsError,
+    setAnnotations: setScheduleAnnotations,
+    onErrorUpdate: setScheduleChatError,
+    refreshAnnotations: refreshScheduleAnnotations,
+  } = useEntryChat(selectedScheduleId, visible);
 
   const renderDayCell = (day: Date, isCurrentMonth = true) => {
     const dayKey = formatDateKey(day);
@@ -208,6 +276,14 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
 
   const weekDays = useMemo(() => buildWeek(currentCursor), [currentCursor]);
   const monthDays = useMemo(() => buildMonth(currentCursor), [currentCursor]);
+  const weekRangeLabel = useMemo(() => {
+    const start = weekDays[0];
+    const end = weekDays[6];
+    if (start && end) {
+      return `${formatMonthTitle(start)} — ${formatMonthTitle(end)}`;
+    }
+    return formatMonthTitle(currentCursor);
+  }, [weekDays, currentCursor]);
 
   return (
     <Modal
@@ -289,7 +365,7 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
               </TouchableOpacity>
               <Text style={styles.calendarHeaderTitle}>
                 {viewMode === "week"
-                  ? `${formatMonthTitle(weekDays[0])} — ${formatMonthTitle(weekDays[6])}`
+                  ? weekRangeLabel
                   : formatMonthTitle(currentCursor)}
               </Text>
               <TouchableOpacity
@@ -351,90 +427,93 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
                 <Text style={styles.errorText}>{error}</Text>
               </View>
             ) : (
-              <>
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Itinerary</Text>
-                  {itinerary.length === 0 ? (
-                    <Text style={styles.emptyText}>
-                      No schedules yet for this day. Use + Schedule to add one.
-                    </Text>
-                  ) : (
-                    itinerary.map((entry) => {
-                      const { place, time, reason } = parseScheduleContent(
-                        entry.content
-                      );
-                      return (
-                        <View key={entry.id} style={styles.scheduleCard}>
-                          <View style={styles.scheduleRow}>
-                            <Ionicons
-                              name="location-outline"
-                              size={16}
-                              color={colors.accent}
-                            />
-                            <Text style={styles.scheduleValue}>
-                              {place || "Tap to set place in chat"}
-                            </Text>
-                          </View>
-                          <View style={styles.scheduleRow}>
-                            <Ionicons
-                              name="time-outline"
-                              size={16}
-                              color={colors.textSecondary}
-                            />
-                            <Text style={styles.scheduleValue}>
-                              {time || "Add a time"}
-                            </Text>
-                          </View>
-                          <View style={styles.scheduleRow}>
-                            <Ionicons
-                              name="chatbubble-ellipses-outline"
-                              size={16}
-                              color={colors.textSecondary}
-                            />
-                            <Text style={styles.scheduleValue}>
-                              {reason || "Note a reason or intention"}
-                            </Text>
-                          </View>
-                          {entry.ai_meta?.rationale && (
-                            <View style={styles.metaBox}>
-                              <Text style={styles.metaLabel}>AI Insight</Text>
-                              <Text style={styles.metaValue}>
-                                {String(entry.ai_meta.rationale)}
-                              </Text>
-                            </View>
-                          )}
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Itinerary</Text>
+                {itinerary.length === 0 ? (
+                  <Text style={styles.emptyText}>
+                    No schedules yet for this day. Use + Schedule to add one.
+                  </Text>
+                ) : (
+                  itinerary.map((entry) => {
+                    const { place, time, reason } = parseScheduleContent(
+                      entry.content
+                    );
+                    const isActive = entry.id === selectedScheduleId;
+                    return (
+                      <TouchableOpacity
+                        key={entry.id}
+                        style={[
+                          styles.scheduleCard,
+                          isActive && styles.scheduleCardActive,
+                        ]}
+                        onPress={() => setSelectedScheduleId(entry.id)}
+                      >
+                        <View style={styles.scheduleRow}>
+                          <Ionicons
+                            name="location-outline"
+                            size={16}
+                            color={colors.accent}
+                          />
+                          <Text style={styles.scheduleValue}>
+                            {place || "Tap to set place in chat"}
+                          </Text>
                         </View>
-                      );
-                    })
-                  )}
-                </View>
-
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Linked Reflections</Text>
-                  {reflections.length === 0 ? (
-                    <Text style={styles.emptyText}>
-                      No journal or goal entries from this day yet.
-                    </Text>
-                  ) : (
-                    reflections.map((entry) => (
-                      <View key={entry.id} style={styles.reflectionCard}>
-                        <Text style={styles.reflectionType}>
-                          {entry.type === "goal"
-                            ? "Goal"
-                            : entry.type === "journal"
-                              ? "Journal"
-                              : "Schedule"}
-                        </Text>
-                        <Text style={styles.reflectionContent}>
-                          {entry.content}
-                        </Text>
-                      </View>
-                    ))
-                  )}
-                </View>
-              </>
+                        <View style={styles.scheduleRow}>
+                          <Ionicons
+                            name="time-outline"
+                            size={16}
+                            color={colors.textSecondary}
+                          />
+                          <Text style={styles.scheduleValue}>
+                            {time || "Add a time"}
+                          </Text>
+                        </View>
+                        <View style={styles.scheduleRow}>
+                          <Ionicons
+                            name="chatbubble-ellipses-outline"
+                            size={16}
+                            color={colors.textSecondary}
+                          />
+                          <Text style={styles.scheduleValue}>
+                            {reason || "Note a reason or intention"}
+                          </Text>
+                        </View>
+                        {entry.ai_meta?.rationale && (
+                          <View style={styles.metaBox}>
+                            <Text style={styles.metaLabel}>AI Insight</Text>
+                            <Text style={styles.metaValue}>
+                              {String(entry.ai_meta.rationale)}
+                            </Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </View>
             )}
           </ScrollView>
+
+          <View style={styles.entryChatContainer}>
+            {selectedScheduleId && scheduleEntry ? (
+              <MenuEntryChat
+                entry={scheduleEntry}
+                annotations={scheduleAnnotations}
+                loading={annotationsLoading}
+                error={annotationsError}
+                onAnnotationsUpdate={setScheduleAnnotations}
+                onAnnotationCountUpdate={() => undefined}
+                onErrorUpdate={setScheduleChatError}
+                onRefreshAnnotations={refreshScheduleAnnotations}
+              />
+            ) : (
+              <View style={styles.emptyChatContainer}>
+                <Text style={styles.emptyText}>
+                  Select a schedule to open notes and AI coaching.
+                </Text>
+              </View>
+            )}
+          </View>
         </SafeAreaView>
       </View>
     </Modal>
@@ -637,6 +716,12 @@ const createStyles = (colors: any) =>
       padding: spacing.md,
       marginBottom: spacing.sm,
     },
+    scheduleCardActive: {
+      borderColor: colors.accent,
+      shadowColor: colors.accent,
+      shadowOpacity: 0.2,
+      shadowRadius: 8,
+    },
     scheduleRow: {
       flexDirection: "row",
       alignItems: "center",
@@ -668,25 +753,17 @@ const createStyles = (colors: any) =>
       color: colors.textPrimary,
       fontSize: 13,
     },
-    reflectionCard: {
-      padding: spacing.md,
-      borderRadius: radii.md,
-      backgroundColor: colors.surface,
+    entryChatContainer: {
+      marginTop: spacing.lg,
+      borderRadius: radii.lg,
       borderWidth: 1,
       borderColor: colors.border,
-      marginBottom: spacing.sm,
+      backgroundColor: colors.surface,
+      overflow: "hidden",
+      maxHeight: 520,
     },
-    reflectionType: {
-      fontFamily: typography.caption.fontFamily,
-      fontSize: 12,
-      textTransform: "uppercase",
-      color: colors.textSecondary,
-      marginBottom: 4,
-    },
-    reflectionContent: {
-      fontFamily: typography.body.fontFamily,
-      color: colors.textPrimary,
-      fontSize: 14,
+    emptyChatContainer: {
+      padding: spacing.md,
     },
   });
 

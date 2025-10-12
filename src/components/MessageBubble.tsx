@@ -49,43 +49,66 @@ const MessageBubble = memo(
           !isPartOfGroup && styles.firstInGroup,
         ]}
       >
-        <View
-          style={[
-            styles.bubble,
-            isBot ? styles.botBubble : styles.userBubble,
-            hasStatus && styles.bubbleWithStatus,
-          ]}
-        >
-          {hasStatus && (
-            <View style={styles.statusRow}>
-              <TouchableOpacity
-                onPress={() =>
-                  message.status === "failed" && onRetry?.(message.id)
-                }
-                style={styles.statusContainer}
-              >
-                <Text style={[styles.statusIcon, { color: getStatusColor() }]}>
-                  {getStatusIcon()}
-                </Text>
-                {message.status === "failed" && (
-                  <Text style={[styles.retryText, { color: getStatusColor() }]}>
-                    Tap to retry
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
-          <Text
+        <View style={styles.bubbleShadow}>
+          <View
             style={[
-              styles.content,
-              isBot ? styles.botContent : styles.userContent,
+              styles.bubble,
+              isBot ? styles.botBubble : styles.userBubble,
+              hasStatus && styles.bubbleWithStatus,
             ]}
           >
-            {message.content}
-          </Text>
-          {message.kind === "entry" && (
-            <Text style={styles.typeLabel}>{message.type.toUpperCase()}</Text>
-          )}
+            {hasStatus && (
+              <View style={styles.statusRow}>
+                <TouchableOpacity
+                  onPress={() =>
+                    message.status === "failed" && onRetry?.(message.id)
+                  }
+                  style={styles.statusContainer}
+                >
+                  <Text style={[styles.statusIcon, { color: getStatusColor() }]}>
+                    {getStatusIcon()}
+                  </Text>
+                  {message.status === "failed" && (
+                    <Text style={[styles.retryText, { color: getStatusColor() }]}>
+                      Tap to retry
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+            <Text
+              style={[
+                styles.content,
+                isBot ? styles.botContent : styles.userContent,
+              ]}
+            >
+              {message.content}
+            </Text>
+            {message.kind === "entry" && message.intentMeta && (
+              <View style={styles.intentContainer}>
+                <Text style={styles.intentLabel}>{`Intent: ${message.intentMeta.displayLabel}`}</Text>
+                <Text style={styles.intentConfidence}>{`${Math.round((message.intentMeta.confidence ?? 0) * 100)}%`}</Text>
+              </View>
+            )}
+            {message.kind === "entry" && message.processing?.length ? (
+              <View style={styles.processingRow}>
+                {message.processing.map((step) => (
+                  <View
+                    key={step.id}
+                    style={[
+                      styles.processingChip,
+                      styles[`processing_${step.status}` as const],
+                    ]}
+                  >
+                    <Text style={styles.processingText}>{step.label}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            {message.kind === "entry" && (
+              <Text style={styles.typeLabel}>{message.type.toUpperCase()}</Text>
+            )}
+          </View>
         </View>
         {showTimestamp && (
           <Text style={styles.timestamp}>
@@ -116,8 +139,13 @@ const createStyles = (colors: any) =>
     firstInGroup: {
       marginTop: spacing.md,
     },
-    bubble: {
+    bubbleShadow: {
       maxWidth: "80%",
+      borderRadius: radii.md,
+      backgroundColor: colors.background,
+      ...shadows.glass,
+    },
+    bubble: {
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm + 4,
       borderRadius: radii.md,
@@ -129,13 +157,11 @@ const createStyles = (colors: any) =>
       backgroundColor: colors.surfaceElevated,
       borderWidth: 1,
       borderColor: colors.accent,
-      ...shadows.glass,
     },
     userBubble: {
       backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: colors.border,
-      ...shadows.glass,
     },
     statusRow: {
       flexDirection: "row",
@@ -169,6 +195,58 @@ const createStyles = (colors: any) =>
     },
     userContent: {
       color: colors.textPrimary,
+    },
+    intentContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginTop: spacing.xs,
+    },
+    intentLabel: {
+      ...typography.caption,
+      fontSize: 11,
+      color: colors.accent,
+      marginRight: spacing.xs,
+    },
+    intentConfidence: {
+      ...typography.caption,
+      fontSize: 11,
+      color: colors.textSecondary,
+    },
+    processingRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.xs,
+      marginTop: spacing.xs,
+    },
+    processingChip: {
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    processing_pending: {
+      borderColor: colors.border,
+    },
+    processing_running: {
+      borderColor: colors.accent,
+    },
+    processing_done: {
+      borderColor: colors.success,
+    },
+    processing_error: {
+      borderColor: colors.error,
+    },
+    processing_skipped: {
+      borderColor: colors.border,
+      opacity: 0.6,
+    },
+    processingText: {
+      ...typography.caption,
+      fontSize: 10,
+      color: colors.textPrimary,
+      textTransform: "uppercase",
     },
     typeLabel: {
       ...typography.caption,

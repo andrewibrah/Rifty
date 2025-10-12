@@ -140,29 +140,43 @@ const MessageInput: React.FC<MessageInputProps> = ({
         )}
       </View>
       <View style={styles.inputRow}>
-        <TextInput
-          ref={inputRef}
-          style={[styles.input, isFocused && styles.inputFocused]}
-          value={content}
-          onChangeText={handleTextChange}
-          placeholder="Type your reflection..."
-          placeholderTextColor={colors.textTertiary}
-          multiline
-          maxLength={500}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
-        />
-        <TouchableOpacity
-          onPress={onSend}
-          style={[styles.sendButton, disableSend && styles.sendButtonDisabled]}
-          disabled={disableSend}
+        <View
+          style={[
+            styles.inputWrapper,
+            isFocused && styles.inputWrapperFocused,
+          ]}
         >
-          <Ionicons
-            name="arrow-up"
-            size={20}
-            color={disableSend ? colors.textTertiary : colors.textPrimary}
+          <TextInput
+            ref={inputRef}
+            style={[styles.input, isFocused && styles.inputFocused]}
+            value={content}
+            onChangeText={handleTextChange}
+            placeholder="Type your reflection..."
+            placeholderTextColor={colors.textTertiary}
+            multiline
+            maxLength={500}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
           />
-        </TouchableOpacity>
+        </View>
+        <View
+          style={[
+            styles.sendButtonWrapper,
+            !disableSend && styles.sendButtonWrapperActive,
+          ]}
+        >
+          <TouchableOpacity
+            onPress={onSend}
+            style={[styles.sendButton, disableSend && styles.sendButtonDisabled]}
+            disabled={disableSend}
+          >
+            <Ionicons
+              name="arrow-up"
+              size={20}
+              color={disableSend ? colors.textTertiary : colors.textPrimary}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -225,6 +239,15 @@ const createStyles = (colors: any, insets: any) =>
       flexDirection: "row",
       alignItems: "flex-end",
     },
+    inputWrapper: {
+      flex: 1,
+      marginRight: spacing.sm,
+      borderRadius: radii.md,
+      backgroundColor: colors.background,
+    },
+    inputWrapperFocused: {
+      ...shadows.glow,
+    },
     input: {
       flex: 1,
       minHeight: 52,
@@ -233,7 +256,6 @@ const createStyles = (colors: any, insets: any) =>
       borderRadius: radii.md,
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.md + 2,
-      marginRight: spacing.sm,
       fontFamily: typography.body.fontFamily,
       fontWeight: typography.body.fontWeight,
       letterSpacing: typography.body.letterSpacing,
@@ -246,6 +268,13 @@ const createStyles = (colors: any, insets: any) =>
     inputFocused: {
       borderColor: colors.accent,
       backgroundColor: colors.surfaceElevated,
+    },
+    sendButtonWrapper: {
+      borderRadius: radii.md,
+      backgroundColor: colors.background,
+      ...shadows.glass,
+    },
+    sendButtonWrapperActive: {
       ...shadows.glow,
     },
     sendButton: {
@@ -257,7 +286,6 @@ const createStyles = (colors: any, insets: any) =>
       borderColor: colors.accent,
       justifyContent: "center",
       alignItems: "center",
-      ...shadows.glow,
     },
     sendButtonDisabled: {
       borderColor: colors.borderLight,

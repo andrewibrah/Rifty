@@ -1,6 +1,13 @@
-import Constants from "expo-constants";
 import { supabase } from "./supabase";
 import type { EntryType } from "../services/data";
+import type {
+  EntryNotePayload,
+  IntentPredictionResult,
+  ProcessingStep,
+} from "../types/intent";
+import type { NativeIntentResult } from "../native/intent";
+import type { EnrichedPayload, RouteDecision, RedactionResult, PlannerResponse } from "@/agent/types";
+import type { MemoryRecord } from "@/agent/memory";
 
 export interface ClassifiedEntry {
   id: string;
@@ -16,91 +23,88 @@ export interface ClassifiedEntry {
   source: string | null;
 }
 
-const getExtra = () =>
-  (Constants.expoConfig?.extra ?? {}) as Record<string, any>;
-
-function getSupabaseUrl(): string {
-  const extra = getExtra();
-  const url =
-    extra.SUPABASE_URL ??
-    extra.EXPO_PUBLIC_SUPABASE_URL ??
-    process.env.EXPO_PUBLIC_SUPABASE_URL ??
-    "";
-  if (!url) {
-    throw new Error("Missing Supabase URL configuration");
-  }
-  return url;
+export interface CreateEntryFromChatArgs {
+  content: string;
+  entryType: EntryType;
+  intent: IntentPredictionResult;
+  note: EntryNotePayload | null;
+  processingTimeline: ProcessingStep[];
+  nativeIntent?: NativeIntentResult | null;
+  enriched?: EnrichedPayload;
+  decision?: RouteDecision;
+  redaction?: RedactionResult;
+  memoryMatches?: MemoryRecord[];
+  plan?: PlannerResponse | null;
 }
 
-function getAnonKey(): string {
-  const extra = getExtra();
-  const key =
-    extra.SUPABASE_ANON_KEY ??
-    extra.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
-    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
-    "";
-  if (!key) {
-    throw new Error("Missing Supabase anon key configuration");
-  }
-  return key;
-}
-
-async function getAccessToken(): Promise<string> {
-  const { data, error } = await supabase.auth.getSession();
-  if (error) {
-    throw error;
-  }
-  const accessToken = data.session?.access_token ?? null;
-  if (!accessToken) {
-    throw new Error("No active session");
-  }
-  return accessToken;
-}
-
-async function parseError(response: Response): Promise<string> {
-  try {
-    const body = await response.json();
-    if (body && typeof body.error === "string" && body.error) {
-      return body.error;
-    }
-    return "Request failed";
-  } catch (_error) {
-    return "Request failed";
-  }
-}
+const SOURCE_TAG = "ai";
 
 export async function createEntryFromChat(
-  content: string
+  args: CreateEntryFromChatArgs
 ): Promise<ClassifiedEntry> {
-  const trimmedContent = content.trim();
+  const trimmedContent = args.content.trim();
   if (!trimmedContent) {
     throw new Error("Content is required");
   }
 
-  const [url, anonKey, accessToken] = await Promise.all([
-    Promise.resolve(getSupabaseUrl()),
-    Promise.resolve(getAnonKey()),
-    getAccessToken(),
-  ]);
-
-  const response = await fetch(
-    `${url}/functions/v1/classify_and_create_entry`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-        apikey: anonKey,
-      },
-      body: JSON.stringify({ content: trimmedContent }),
-    }
-  );
-
-  if (!response.ok) {
-    const message = await parseError(response);
-    throw new Error(message);
+  const { data: userResult, error: userError } = await supabase.auth.getUser();
+  if (userError) {
+    throw userError;
+  }
+  const userId = userResult.user?.id;
+  if (!userId) {
+    throw new Error("No active session");
   }
 
-  const data = (await response.json()) as ClassifiedEntry;
-  return data;
+  const metadata = {
+    subsystem: args.intent.subsystem,
+    searchTag: args.note?.searchTag ?? null,
+    noteDraft: args.note,
+    nativeIntent: args.nativeIntent ?? null,
+    routing: args.decision ?? null,
+    slots: args.enriched?.intent.slots ?? {},
+    memoryMatches: args.memoryMatches ?? [],
+    redaction: args.redaction?.replacementMap ?? {},
+    plan: args.plan ?? null,
+  };
+
+  const aiMeta = {
+    intent: {
+      id: args.intent.id,
+      rawLabel: args.intent.rawLabel,
+      label: args.intent.label,
+      confidence: args.intent.confidence,
+      subsystem: args.intent.subsystem,
+      probabilities: args.intent.probabilities,
+    },
+    note: args.note,
+    processingTimeline: args.processingTimeline,
+    nativeIntent: args.nativeIntent ?? null,
+    routing: args.decision ?? null,
+    enriched: args.enriched ?? null,
+    memoryMatches: args.memoryMatches ?? [],
+    redaction: args.redaction?.replacementMap ?? {},
+    plan: args.plan ?? null,
+  };
+
+  const { data, error } = await supabase
+    .from("entries")
+    .insert({
+      user_id: userId,
+      type: args.entryType,
+      content: trimmedContent,
+      metadata,
+      ai_intent: args.intent.id,
+      ai_confidence: args.intent.confidence,
+      ai_meta: aiMeta,
+      source: SOURCE_TAG,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as ClassifiedEntry;
 }

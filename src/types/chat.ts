@@ -1,4 +1,5 @@
 import type { EntryType } from '../services/data';
+import type { IntentMetadata, ProcessingStep } from './intent';
 
 export interface Message {
   id: string;
@@ -13,6 +14,8 @@ export interface EntryMessage extends Message {
   aiIntent?: string | null;
   aiConfidence?: number | null;
   aiMeta?: Record<string, any> | null;
+  intentMeta?: IntentMetadata;
+  processing?: ProcessingStep[];
 }
 
 export interface BotMessage extends Message {

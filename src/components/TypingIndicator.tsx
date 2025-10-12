@@ -11,13 +11,15 @@ const TypingIndicator: React.FC<TypingIndicatorProps> = ({ isVisible }) => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.typingIndicator}>
-        <ActivityIndicator
-          size="small"
-          color={colors.accent}
-          style={styles.spinner}
-        />
-        <Text style={styles.typingText}>Rifty is responding...</Text>
+      <View style={styles.typingShadow}>
+        <View style={styles.typingIndicator}>
+          <ActivityIndicator
+            size="small"
+            color={colors.accent}
+            style={styles.spinner}
+          />
+          <Text style={styles.typingText}>Rifty is responding...</Text>
+        </View>
       </View>
     </View>
   );
@@ -32,12 +34,17 @@ const styles = StyleSheet.create({
   typingIndicator: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: colors.surface,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.border,
+    maxWidth: "85%",
+    backgroundColor: colors.surface,
+  },
+  typingShadow: {
+    borderRadius: radii.md,
+    backgroundColor: colors.background,
     ...shadows.glass,
     maxWidth: "85%",
   },

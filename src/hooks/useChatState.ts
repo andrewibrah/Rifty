@@ -10,7 +10,29 @@ import {
   listJournals,
   type EntryType,
 } from "../services/data";
-import { createEntryFromChat } from "../lib/entries";
+import {
+  createEntryFromChat,
+  type CreateEntryFromChatArgs,
+} from "../lib/entries";
+import { buildPredictionFromNative } from "../lib/intent";
+import { composeEntryNote } from "../services/ai";
+import type {
+  EntryNotePayload,
+  IntentMetadata,
+  IntentPredictionResult,
+  ProcessingStep,
+  ProcessingStepId,
+} from "../types/intent";
+import { handleMessage } from "@/chat/handleMessage";
+import type { IntentPayload } from "@/chat/handleMessage";
+import { Memory } from "@/agent/memory";
+import type { MemoryKind } from "@/agent/memory";
+import { planAction } from "@/agent/planner";
+import type { PlannerResponse } from "@/agent/types";
+import { Telemetry } from "@/agent/telemetry";
+import { Outbox } from "@/agent/outbox";
+import { handleToolCall } from "@/agent/actions";
+import type { ToolExecutionResult } from "@/agent/actions";
 
 const successMessages: Record<EntryType, string> = {
   goal: "Saved. Keep up your hard work.",
@@ -18,7 +40,166 @@ const successMessages: Record<EntryType, string> = {
   schedule: "Saved. Your time is your power, use it wisely.",
 };
 
-export const useChatState = (onEntryCreated?: () => void) => {
+const buildLocalFallbackNote = (
+  label: string,
+  message: string
+): EntryNotePayload => ({
+  noteTitle: `${label} draft`,
+  noteBody: message.slice(0, 280).trim() || label,
+  searchTag: label.toLowerCase().replace(/\s+/g, "-") || "journal-entry",
+  guidance: "Fallback note generated locally while offline.",
+});
+
+const formatDate = (iso: string | undefined): string | null => {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+  }).format(date);
+};
+
+const formatDateTime = (iso: string | undefined): string | null => {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    month: 'short',
+    day: 'numeric',
+  }).format(date);
+};
+
+const buildConfirmationMessage = (
+  entryType: EntryType,
+  slots: Record<string, string>,
+  fallback: string,
+  offline: boolean
+): string => {
+  if (offline) return fallback;
+  switch (entryType) {
+    case 'schedule': {
+      const start = formatDateTime(slots.start);
+      const endTime = formatDateTime(slots.end);
+      const location = slots.location ? ` at ${slots.location}` : '';
+      if (start && endTime) {
+        return `Booked ${slots.title ?? 'your event'} → ${start} – ${endTime}${location}`;
+      }
+      if (start) {
+        return `Booked ${slots.title ?? 'your event'} → ${start}${location}`;
+      }
+      break;
+    }
+    case 'goal': {
+      const due = formatDate(slots.due);
+      if (slots.title && due) {
+        return `Locked it in: ${slots.title} • Target ${due}`;
+      }
+      if (slots.title) {
+        return `Locked it in: ${slots.title}`;
+      }
+      break;
+    }
+    case 'journal': {
+      if (slots.title) {
+        return `Captured “${slots.title}” — saved to your journal.`;
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  return fallback;
+};
+
+const entryTypeToMemoryKind: Record<EntryType, MemoryKind> = {
+  journal: "entry",
+  goal: "goal",
+  schedule: "event",
+};
+
+const processingTemplate = (): ProcessingStep[] => [
+  {
+    id: "ml_detection",
+    label: "ML prediction",
+    status: "pending",
+  },
+  {
+    id: "knowledge_search",
+    label: "Knowledge base",
+    status: "pending",
+  },
+  {
+    id: "openai_request",
+    label: "OpenAI request",
+    status: "pending",
+  },
+  {
+    id: "openai_response",
+    label: "OpenAI received",
+    status: "pending",
+  },
+];
+
+const updateTimeline = (
+  timeline: ProcessingStep[],
+  stepId: ProcessingStepId,
+  status: ProcessingStep["status"],
+  detail?: string
+): ProcessingStep[] =>
+  timeline.map((step) => {
+    if (step.id !== stepId) {
+      return step;
+    }
+    const next: ProcessingStep = {
+      ...step,
+      status,
+      timestamp: new Date().toISOString(),
+    };
+    if (detail !== undefined) {
+      next.detail = detail;
+    } else {
+      delete next.detail;
+    }
+    return next;
+  });
+
+const buildIntentMeta = (
+  prediction: IntentPredictionResult
+): IntentMetadata => ({
+  id: prediction.id,
+  rawLabel: prediction.rawLabel,
+  displayLabel: prediction.label,
+  confidence: prediction.confidence,
+  subsystem: prediction.subsystem,
+  probabilities: prediction.probabilities,
+});
+
+export interface IntentReviewTicket {
+  messageId: string;
+  content: string;
+  intent: IntentPredictionResult;
+  entryType: EntryType;
+}
+
+export const useChatState = (
+  onEntryCreated?: () => void
+): {
+  messages: ChatMessage[];
+  isTyping: boolean;
+  groupMessages: (msgs: ChatMessage[]) => MessageGroup[];
+  sendMessage: (content: string) => Promise<IntentReviewTicket | null>;
+  retryMessage: (messageId: string) => Promise<void>;
+  clearMessages: () => void;
+  updateMessageIntent: (
+    messageId: string,
+    intent: IntentMetadata,
+    nextType?: EntryType
+  ) => void;
+} => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -40,6 +221,12 @@ export const useChatState = (onEntryCreated?: () => void) => {
           }
 
           const createdAt = entry.created_at || new Date().toISOString();
+          const baseMeta = (entry.ai_meta ?? {}) as Record<string, any>;
+          const intentMeta = baseMeta?.intent as IntentMetadata | undefined;
+          const processing = Array.isArray(baseMeta?.processingTimeline)
+            ? (baseMeta.processingTimeline as ProcessingStep[])
+            : undefined;
+
           const entryMessage: EntryMessage = {
             id: entry.id,
             kind: "entry",
@@ -52,15 +239,23 @@ export const useChatState = (onEntryCreated?: () => void) => {
               typeof entry.ai_confidence === "number"
                 ? entry.ai_confidence
                 : null,
-            aiMeta: entry.ai_meta ?? null,
+            aiMeta: baseMeta ?? null,
           };
+          if (intentMeta) {
+            entryMessage.intentMeta = intentMeta;
+          }
+          if (processing) {
+            entryMessage.processing = processing;
+          }
           chatMessages.push(entryMessage);
 
           const botMessage: BotMessage = {
             id: `bot-${entry.id}`,
             kind: "bot",
             afterId: entry.id,
-            content: successMessages[entry.type],
+            content:
+              (baseMeta?.note?.guidance as string | undefined) ??
+              successMessages[entry.type],
             created_at: createdAt,
             status: "sent",
           };
@@ -86,7 +281,6 @@ export const useChatState = (onEntryCreated?: () => void) => {
   const groupMessages = useCallback((msgs: ChatMessage[]): MessageGroup[] => {
     if (msgs.length === 0) return [];
 
-    // Sort messages by timestamp
     const sortedMsgs = [...msgs].sort(
       (a, b) =>
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
@@ -102,7 +296,6 @@ export const useChatState = (onEntryCreated?: () => void) => {
         currentGroup &&
         messageTime - new Date(currentGroup.timestamp).getTime() < 300000
       ) {
-        // 5 minutes
         currentGroup.messages.push(message);
       } else {
         currentGroup = {
@@ -118,109 +311,351 @@ export const useChatState = (onEntryCreated?: () => void) => {
     return groups;
   }, []);
 
-  const sendMessage = useCallback(async (content: string) => {
-    const trimmedContent = content.trim();
-    if (!trimmedContent) return;
+  const patchEntryMessage = useCallback(
+    (id: string, patch: (message: EntryMessage) => EntryMessage) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === id && msg.kind === "entry" ? patch(msg) : msg
+        )
+      );
+    },
+    []
+  );
 
-    const tempId = Date.now().toString();
-    const optimisticType: EntryType = "journal";
-    const userMessage: EntryMessage = {
-      id: tempId,
-      kind: "entry",
-      type: optimisticType,
-      content: trimmedContent,
-      created_at: new Date().toISOString(),
-      status: "sending",
-    };
+  const sendMessage = useCallback(
+    async (content: string): Promise<IntentReviewTicket | null> => {
+      const trimmedContent = content.trim();
+      if (!trimmedContent) return null;
 
-    setMessages((prevMessages) => [...prevMessages, userMessage]);
+      const tempId = Date.now().toString();
+      const createdAt = new Date().toISOString();
+      let processingTimeline = processingTemplate();
 
-    try {
-      const saved = await createEntryFromChat(trimmedContent);
-      const resolvedType = (saved.type ?? "journal") as EntryType;
-      const aiIntent = saved.ai_intent ?? resolvedType;
-      const aiConfidence =
-        typeof saved.ai_confidence === "number" ? saved.ai_confidence : null;
-      const aiMeta = saved.ai_meta ?? null;
+      const provisional: EntryMessage = {
+        id: tempId,
+        kind: "entry",
+        type: "journal",
+        content: trimmedContent,
+        created_at: createdAt,
+        status: "sending",
+        processing: processingTimeline,
+      };
 
-      if (saved?.id) {
-        const entryId = saved.id;
+      setMessages((prev) => [...prev, provisional]);
 
-        // Notify that an entry was created to refresh counters
+      const applyProcessing = (
+        stepId: ProcessingStepId,
+        status: ProcessingStep["status"],
+        detail?: string
+      ) => {
+        processingTimeline = updateTimeline(processingTimeline, stepId, status, detail);
+        patchEntryMessage(tempId, (msg) => ({
+          ...msg,
+          processing: processingTimeline,
+        }));
+      };
+
+      let prediction: IntentPredictionResult | null = null;
+      let intentPayload: IntentPayload | null = null;
+      let notePayload: EntryNotePayload | null = null;
+      let entryType: EntryType = "journal";
+
+      try {
+        applyProcessing("ml_detection", "running", "Analyzing");
+        intentPayload = await handleMessage(trimmedContent, {
+          userTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        });
+        prediction = buildPredictionFromNative(intentPayload.nativeIntent);
+        entryType = prediction.entryType ?? "journal";
+        const intentMeta = buildIntentMeta(prediction);
+
+        applyProcessing(
+          "ml_detection",
+          "done",
+          `${prediction.rawLabel} ${(prediction.confidence * 100).toFixed(1)}%`
+        );
+
+        patchEntryMessage(tempId, (msg) => {
+          const next: EntryMessage = {
+            ...msg,
+            type: entryType,
+            aiIntent: prediction?.id ?? entryType,
+            aiConfidence: prediction?.confidence ?? null,
+          };
+          if (intentMeta) {
+            next.intentMeta = intentMeta;
+          }
+          return next;
+        });
+
+        const decision = intentPayload.decision;
+        const memoryCount = intentPayload.memoryMatches.length;
+        const contextDetail =
+          memoryCount > 0
+            ? `Attached ${memoryCount} context snippet${memoryCount === 1 ? '' : 's'}`
+            : "No local context";
+
+        applyProcessing("knowledge_search", "done", contextDetail);
+
+        if (decision.kind === "fallback") {
+          applyProcessing("openai_request", "skipped", "Confidence below 45%");
+          applyProcessing("openai_response", "skipped", "Awaiting user choice");
+
+          patchEntryMessage(tempId, (msg) => ({
+            ...msg,
+            status: "sent" as const,
+            processing: processingTimeline,
+          }));
+
+          const fallbackText =
+            "Got it. How do you want me to handle that—journal it, schedule it, or set it as a goal?";
+          const botMessage: BotMessage = {
+            id: `bot-${tempId}`,
+            kind: "bot",
+            afterId: tempId,
+            content: fallbackText,
+            created_at: new Date().toISOString(),
+            status: "sent",
+          };
+
+          setMessages((prevState) => [...prevState, botMessage]);
+          return null;
+        }
+
+        if (decision.kind === "clarify") {
+          applyProcessing("openai_request", "skipped", "Awaiting clarification");
+          applyProcessing("openai_response", "skipped", "Awaiting clarification");
+
+          patchEntryMessage(tempId, (msg) => ({
+            ...msg,
+            status: "sent" as const,
+            processing: processingTimeline,
+          }));
+
+          const question = decision.question ?? "Could you clarify that intent?";
+          const botMessage: BotMessage = {
+            id: `bot-${tempId}`,
+            kind: "bot",
+            afterId: tempId,
+            content: question,
+            created_at: new Date().toISOString(),
+            status: "sent",
+          };
+
+          setMessages((prevState) => [...prevState, botMessage]);
+          return null;
+        }
+
+        let plannerOutput: PlannerResponse | null = null;
+        let toolExecution: ToolExecutionResult | null = null;
+        let offlinePolishRequired = false;
+        try {
+          applyProcessing("openai_request", "running", "Planner routing");
+          const plannerResult = await planAction({
+            payload: intentPayload.enriched,
+          });
+          plannerOutput = plannerResult.response;
+          toolExecution = handleToolCall(plannerOutput, {
+            originalText: trimmedContent,
+          });
+          if (intentPayload.traceId) {
+            Telemetry.update(intentPayload.traceId, {
+              plan: plannerOutput ?? null,
+            }).catch((error) => {
+              console.warn('[telemetry] update failed', error);
+            });
+          }
+          applyProcessing(
+            "openai_request",
+            "done",
+            plannerOutput?.action ?? "noop"
+          );
+
+          applyProcessing("openai_response", "running", "Drafting note");
+          notePayload = await composeEntryNote({
+            userMessage: trimmedContent,
+            intent: prediction,
+            enriched: intentPayload.enriched,
+            planner: plannerOutput,
+          });
+          applyProcessing(
+            "openai_response",
+            "done",
+            notePayload.noteTitle
+          );
+        } catch (error: any) {
+          console.warn("composeEntryNote fallback", error?.message ?? error);
+          applyProcessing(
+            "openai_request",
+            "error",
+            error?.message ?? "OpenAI unavailable"
+          );
+          applyProcessing(
+            "openai_response",
+            "skipped",
+            "Fallback note"
+          );
+          const fallbackNote =
+            (error?.fallbackNote as EntryNotePayload | undefined) ??
+            buildLocalFallbackNote(prediction.label, trimmedContent);
+          notePayload = fallbackNote;
+          if (error?.offline) {
+            offlinePolishRequired = true;
+            Outbox.queue({
+              kind: "polish",
+              payload: {
+                traceId: intentPayload.traceId,
+                intent: intentPayload.routedIntent,
+                enriched: intentPayload.enriched,
+                content: trimmedContent,
+              },
+            }).catch((queueError) => {
+              console.warn("[outbox] queue failed", queueError);
+            });
+          }
+        }
+
+        if (!prediction) {
+          throw new Error("Intent prediction missing");
+        }
+
+        const confirmedPrediction = prediction;
+
+        const createArgs: CreateEntryFromChatArgs = {
+          content: trimmedContent,
+          entryType,
+          intent: confirmedPrediction,
+          note: notePayload,
+          processingTimeline,
+          nativeIntent: intentPayload?.nativeIntent,
+          enriched: intentPayload.enriched,
+          decision: intentPayload.decision,
+          redaction: intentPayload.redaction,
+          memoryMatches: intentPayload.memoryMatches,
+          plan: plannerOutput,
+        };
+
+        const saved = await createEntryFromChat(createArgs);
+
         if (onEntryCreated) {
           onEntryCreated();
         }
+
+        const createdAtTs = saved.created_at
+          ? new Date(saved.created_at).getTime()
+          : Date.now();
+        await Memory.upsert({
+          id: saved.id,
+          kind: entryTypeToMemoryKind[entryType],
+          text: trimmedContent,
+          ts: createdAtTs,
+        });
+
+        const confirmedIntentMeta = buildIntentMeta(confirmedPrediction);
+        const aiMetaPayload = {
+          intent: confirmedIntentMeta,
+          routing: intentPayload.decision,
+          slots: intentPayload.routedIntent.slots,
+          memoryMatches: intentPayload.memoryMatches,
+          contextSnippets: intentPayload.enriched.contextSnippets,
+          redaction: intentPayload.redaction.replacementMap,
+          payload: intentPayload.enriched,
+          traceId: intentPayload.traceId,
+          plannedExecution: toolExecution,
+          plan: plannerOutput,
+          note: notePayload,
+          processingTimeline,
+          nativeTop3: intentPayload?.nativeIntent.top3 ?? [],
+          rawIntent: intentPayload,
+        };
+
+        patchEntryMessage(tempId, (msg) => ({
+          ...msg,
+          id: saved.id,
+          status: "sent" as const,
+          type: entryType,
+          aiIntent: confirmedPrediction.id ?? entryType,
+          aiConfidence: confirmedPrediction.confidence ?? null,
+          aiMeta: aiMetaPayload,
+          intentMeta: confirmedIntentMeta,
+          processing: processingTimeline,
+        }));
+
+        appendMessage(saved.id, "user", trimmedContent, {
+          messageKind: "entry",
+          entryType,
+          intent: aiMetaPayload.intent,
+          note: notePayload,
+          processingTimeline,
+          rawIntent: intentPayload,
+        }).catch((error) => {
+          console.error("Unable to record entry message", error);
+        });
+
+        const baseAcknowledgement = offlinePolishRequired
+          ? "Got it. I saved that. I’ll refine wording when we’re back online."
+          : notePayload?.guidance ?? successMessages[entryType];
+        const acknowledgement = buildConfirmationMessage(
+          entryType,
+          intentPayload.routedIntent.slots,
+          baseAcknowledgement,
+          offlinePolishRequired
+        );
+
+        setIsTyping(true);
 
         if (timeoutRef.current) {
           clearTimeout(timeoutRef.current);
         }
 
-        setMessages((prevMessages) =>
-          prevMessages.map((msg) =>
-            msg.id === tempId
-              ? {
-                  ...msg,
-                  id: entryId,
-                  status: "sent" as const,
-                  type: resolvedType,
-                  aiIntent,
-                  aiConfidence,
-                  aiMeta,
-                }
-              : msg
-          )
-        );
-
-        appendMessage(entryId, "user", trimmedContent, {
-          messageKind: "entry",
-          entryType: resolvedType,
-          aiIntent,
-          aiConfidence,
-          aiMeta,
-        }).catch((error) => {
-          console.error("Unable to record entry message", error);
-        });
-
-        setIsTyping(true);
-
-        const acknowledgement =
-          successMessages[resolvedType] ?? successMessages.journal;
-
         timeoutRef.current = setTimeout(() => {
           setIsTyping(false);
 
           const botMessage: BotMessage = {
-            id: `bot-${entryId}`,
+            id: `bot-${saved.id}`,
             kind: "bot",
-            afterId: entryId,
+            afterId: saved.id,
             content: acknowledgement,
             created_at: new Date().toISOString(),
             status: "sent",
           };
 
-          setMessages((prevMessages) => [...prevMessages, botMessage]);
+          setMessages((prevState) => [...prevState, botMessage]);
 
-          appendMessage(entryId, "assistant", acknowledgement, {
+          appendMessage(saved.id, "assistant", acknowledgement, {
             messageKind: "autoReply",
-            entryType: resolvedType,
-            afterId: entryId,
-            aiIntent,
-            aiConfidence,
-            aiMeta,
+            entryType,
+            afterId: saved.id,
+            intent: aiMetaPayload.intent,
+            note: notePayload,
+            rawIntent: intentPayload,
           }).catch((error) => {
             console.error("Unable to record auto-reply", error);
           });
         }, 1500);
+
+        return {
+          messageId: saved.id,
+          content: trimmedContent,
+          intent: confirmedPrediction,
+          entryType,
+        };
+      } catch (error) {
+        console.error("Error sending message:", error);
+        applyProcessing(
+          "openai_response",
+          "error",
+          error instanceof Error ? error.message : "Failed"
+        );
+        patchEntryMessage(tempId, (msg) => ({
+          ...msg,
+          status: "failed" as const,
+        }));
+        return null;
       }
-    } catch (error) {
-      setMessages((prevMessages) =>
-        prevMessages.map((msg) =>
-          msg.id === tempId ? { ...msg, status: "failed" as const } : msg
-        )
-      );
-      console.error("Error sending message:", error);
-    }
-  }, [onEntryCreated]);
+    },
+    [messages, onEntryCreated, patchEntryMessage]
+  );
 
   const retryMessage = useCallback(
     async (messageId: string) => {
@@ -237,9 +672,25 @@ export const useChatState = (onEntryCreated?: () => void) => {
   );
 
   const clearMessages = useCallback(() => {
-    // Only clear the visual chat messages, do NOT delete saved entries
     setMessages([]);
   }, []);
+
+  const updateMessageIntent = useCallback(
+    (messageId: string, intentMeta: IntentMetadata, nextType?: EntryType) => {
+      patchEntryMessage(messageId, (msg) => ({
+        ...msg,
+        type: nextType ?? msg.type,
+        aiIntent: intentMeta.id,
+        aiConfidence: intentMeta.confidence,
+        intentMeta,
+        aiMeta: {
+          ...(msg.aiMeta ?? {}),
+          intent: intentMeta,
+        },
+      }));
+    },
+    [patchEntryMessage]
+  );
 
   return {
     messages,
@@ -248,5 +699,6 @@ export const useChatState = (onEntryCreated?: () => void) => {
     sendMessage,
     retryMessage,
     clearMessages,
+    updateMessageIntent,
   };
 };

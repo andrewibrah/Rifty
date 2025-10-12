@@ -1,0 +1,143 @@
+diff --git a/package.json b/package.json
+index 85bdca0..59447ec 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,8 @@
+     "android": "expo start --android",
+     "ios": "expo start --ios",
+     "web": "expo start --web",
+-    "health": "ts-node scripts/health.ts"
++    "health": "ts-node scripts/health.ts",
++    "scan:secrets": "node scripts/scan-secrets.js"
+   },
+   "dependencies": {
+     "@expo/vector-icons": "^15.0.2",
+@@ -17,6 +18,7 @@
+     "expo": "54.0.12",
+     "expo-constants": "^18.0.9",
+     "expo-file-system": "~19.0.16",
++    "expo-sqlite": "~16.0.8",
+     "expo-status-bar": "~3.0.8",
+     "react": "19.1.0",
+     "react-dom": "19.1.0",
+--- /dev/null	2025-10-12 16:01:46
++++ example.env	2025-10-12 15:56:05
+@@ -0,0 +1,16 @@
++# Copy this file to .env.local and fill in environment-specific values.
++# Secrets must never be committed. Run `npm run scan:secrets` before pushing.
++
++# Supabase project configuration
++EXPO_PUBLIC_SUPABASE_URL=
++EXPO_PUBLIC_SUPABASE_ANON_KEY=
++SUPABASE_URL=
++SUPABASE_ANON_KEY=
++
++# OpenAI project key (read only)
++EXPO_PUBLIC_OPENAI_API_KEY=
++OPENAI_API_KEY=
++
++# Optional flags
++APP_ENV=development
++MIGRATION_2025_10_REMOVE_LOCAL_DB=false
+--- /dev/null	2025-10-12 16:01:46
++++ scripts/scan-secrets.js	2025-10-12 15:56:28
+@@ -0,0 +1,84 @@
++#!/usr/bin/env node
++
++/**
++ * Lightweight secret scanner for pre-commit usage.
++ * Scans staged files for common credential patterns to prevent leaks.
++ */
++
++const { execSync } = require('node:child_process');
++const { readFileSync } = require('node:fs');
++const { join } = require('node:path');
++
++const repoRoot = process.cwd();
++
++function getStagedFiles() {
++  const output = execSync('git diff --cached --name-only --diff-filter=ACM', {
++    encoding: 'utf8',
++  }).trim();
++  return output ? output.split('\n') : [];
++}
++
++function isBinary(buffer) {
++  const sample = buffer.slice(0, 1024);
++  return sample.includes(0);
++}
++
++const PATTERNS = [
++  {
++    regex: /(sk-[A-Za-z0-9_-]{20,})/g,
++    message: 'OpenAI-style secret key detected (sk-...)',
++  },
++  {
++    regex: /(eyJhbGciOiJ[A-Za-z0-9_-]{10,})/g,
++    message: 'JWT token detected (typically Supabase anon/service keys).',
++  },
++  {
++    regex: /(https?:\/\/[^\s]+supabase\.co\/[A-Za-z0-9_-]{16,})/g,
++    message: 'Potential Supabase service URL containing project reference.',
++  },
++  {
++    regex: /(-----BEGIN [A-Z ]+-----)/g,
++    message: 'PEM/SSH certificate starting block detected.',
++  },
++  {
++    regex: /(?:api[_-]?key|secret|token)\s*[:=]\s*["']?[A-Za-z0-9_-]{16,}["']?/gi,
++    message: 'Generic API credential pattern detected.',
++  },
++];
++
++function scanFile(path) {
++  const absolutePath = join(repoRoot, path);
++  const buffer = readFileSync(absolutePath);
++  if (isBinary(buffer)) return [];
++  const content = buffer.toString('utf8');
++  const findings = [];
++  for (const pattern of PATTERNS) {
++    pattern.regex.lastIndex = 0;
++    if (pattern.regex.test(content)) {
++      findings.push({ path, message: pattern.message });
++    }
++  }
++  return findings;
++}
++
++function main() {
++  const staged = getStagedFiles();
++  if (!staged.length) {
++    process.exit(0);
++  }
++
++  const problems = staged.flatMap(scanFile);
++
++  if (problems.length > 0) {
++    console.error('\x1b[31mSecret scan failed.\x1b[0m');
++    for (const finding of problems) {
++      console.error(`  - ${finding.path}: ${finding.message}`);
++    }
++    console.error('\nRemove the secret or move it to an ignored .env.local file before committing.');
++    process.exit(1);
++  }
++
++  console.log('Secret scan passed.');
++}
++
++main();
+--- /dev/null	2025-10-12 16:01:46
++++ .githooks/pre-commit	2025-10-12 15:56:40
+@@ -0,0 +1,12 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++# Ensure repo-level Node version is used
++if command -v corepack >/dev/null 2>&1; then
++  corepack enable >/dev/null 2>&1 || true
++fi
++
++# Run secret scanner
++if [ -f "scripts/scan-secrets.js" ]; then
++  node scripts/scan-secrets.js
++fi

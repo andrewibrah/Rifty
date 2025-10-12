@@ -4,25 +4,30 @@
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
-    "health": "ts-node scripts/health.ts"
+    "health": "ts-node scripts/health.ts",
+    "scan:secrets": "node scripts/scan-secrets.js",
+    "postinstall": "patch-package || true"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "^2.2.0",
-    "@rneui/themed": "^4.0.0-rc.8",
+    "@rneui/base": "4.0.0-rc.7",
+    "@rneui/themed": "4.0.0-rc.8",
     "@supabase/supabase-js": "^2.74.0",
     "expo": "54.0.12",
+    "expo-build-properties": "~1.0.9",
     "expo-constants": "^18.0.9",
     "expo-file-system": "~19.0.16",
+    "expo-sqlite": "~16.0.8",
     "expo-status-bar": "~3.0.8",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.4",
-    "react-native-gesture-handler": "^2.28.0",
-    "react-native-safe-area-context": "^5.6.1",
+    "react-native-gesture-handler": "~2.28.0",
+    "react-native-safe-area-context": "5.6.1",
     "react-native-url-polyfill": "^3.0.0",
     "react-native-web": "^0.21.0"
   },
@@ -31,7 +36,13 @@
     "@types/react": "~19.1.0",
     "expo-module-scripts": "^5.0.7",
     "ts-node": "^10.9.2",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "patch-package": "^8.0.0"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "react-native-safe-area-context": "5.6.1",
+    "@rneui/base": "4.0.0-rc.7",
+    "@rneui/themed": "4.0.0-rc.8"
+  }
 }

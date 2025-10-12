@@ -29,6 +29,7 @@ interface MenuListProps {
   onSelectType: (type: EntryType) => void;
   onSelectEntry: (entryId: string) => void;
   onEntriesUpdate: (entries: RemoteJournalEntry[]) => void;
+  onShowHistory?: () => void;
 }
 
 const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
@@ -59,6 +60,7 @@ const MenuList: React.FC<MenuListProps> = ({
   onSelectType,
   onSelectEntry,
   onEntriesUpdate,
+  onShowHistory,
 }) => {
   const { themeMode } = useTheme();
   const colors = getColors(themeMode);
@@ -80,10 +82,11 @@ const MenuList: React.FC<MenuListProps> = ({
             onPress: async () => {
               try {
                 await deleteJournalEntry(id);
-                const updatedEntries = await listJournals({
-                  type: selectedType!,
-                  limit: 100,
-                });
+                const updatedEntries = await listJournals(
+                  selectedType
+                    ? { type: selectedType, limit: 100 }
+                    : { limit: 100 }
+                );
                 onEntriesUpdate(updatedEntries);
               } catch (error) {
                 console.error("Error deleting entry:", error);
@@ -119,9 +122,8 @@ const MenuList: React.FC<MenuListProps> = ({
             onPress: async () => {
               try {
                 await deleteAllEntriesByType(type);
-                // Refresh the entries list
                 const updatedEntries = await listJournals({
-                  type: selectedType!,
+                  type,
                   limit: 100,
                 });
                 onEntriesUpdate(updatedEntries);
@@ -208,6 +210,24 @@ const MenuList: React.FC<MenuListProps> = ({
         {(["goal", "journal", "schedule"] as EntryType[]).map(
           renderCategoryItem
         )}
+        <TouchableOpacity
+          style={[styles.categoryButton, styles.historyButton]}
+          onPress={onShowHistory ?? (() => undefined)}
+        >
+          <View style={styles.categoryIconContainer}>
+            <Ionicons
+              name="time-outline"
+              size={18}
+              color={colors.accent}
+            />
+          </View>
+          <View style={styles.categoryTextContainer}>
+            <Text style={styles.categoryButtonText}>Main History</Text>
+            <Text style={styles.categoryCountText}>
+              View archived conversations
+            </Text>
+          </View>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -285,6 +305,10 @@ const createStyles = (colors: any) =>
       borderRadius: radii.md,
       borderLeftWidth: 2,
       borderLeftColor: "transparent",
+    },
+    historyButton: {
+      marginTop: spacing.lg,
+      borderLeftColor: colors.accent,
     },
     categoryIconContainer: {
       width: 32,

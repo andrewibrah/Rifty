@@ -1,0 +1,3 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -workspace riflett.xcworkspace -scheme riflett -configuration Debug -destination "platform=iOS Simulator,name=iPhone 16 Pro Max"
+

@@ -186,6 +186,27 @@ export async function deleteAllEntriesByType(type: EntryType): Promise<void> {
   }
 }
 
+export async function logIntentAudit(params: {
+  entryId: string
+  prompt: string
+  predictedIntent: string
+  correctIntent: string
+}): Promise<void> {
+  const user = await requireUser()
+
+  const { error } = await supabase.from('intent_audits').insert({
+    user_id: user.id,
+    entry_id: params.entryId,
+    prompt: params.prompt,
+    predicted_intent: params.predictedIntent,
+    correct_intent: params.correctIntent,
+  })
+
+  if (error) {
+    throw error
+  }
+}
+
 export async function getJournalEntryById(
   id: string
 ): Promise<RemoteJournalEntry | null> {

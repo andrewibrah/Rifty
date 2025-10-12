@@ -7,6 +7,8 @@ import {
   Animated,
   Pressable,
   StyleSheet,
+  ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -20,6 +22,9 @@ import MenuEntryChat from "./menu/MenuEntryChat";
 import SettingsModal from "./SettingsModal";
 import { getColors, spacing, typography, radii } from "../theme";
 import { useTheme } from "../contexts/ThemeContext";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { MAIN_HISTORY_STORAGE_KEY } from "../constants/storage";
+import type { MainHistoryRecord } from "../types/history";
 
 interface MenuModalProps {
   visible: boolean;
@@ -52,6 +57,13 @@ const MenuModal: React.FC<MenuModalProps> = ({
   const [currentChatMode, setCurrentChatMode] = useState<"note" | "ai">("note");
   const [showContent, setShowContent] = useState(false);
   const slideAnim = useRef(new Animated.Value(-300)).current;
+  const [historyVisible, setHistoryVisible] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyRecords, setHistoryRecords] = useState<MainHistoryRecord[]>([]);
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(
+    null
+  );
 
   // Use passed menu state or create new one
   const menuState = passedMenuState || useMenuState();
@@ -87,6 +99,12 @@ const MenuModal: React.FC<MenuModalProps> = ({
       menuState.handleBack();
     }
   }, [visible, slideAnim, gestureProgress, menuState]);
+
+  React.useEffect(() => {
+    if (!visible) {
+      setHistoryVisible(false);
+    }
+  }, [visible]);
 
   const handleAnnotationCountUpdate = useCallback(
     (entryId: string, delta: number) => {
@@ -140,6 +158,34 @@ const MenuModal: React.FC<MenuModalProps> = ({
       ]
     );
   }, [entryChat]);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const raw = await AsyncStorage.getItem(MAIN_HISTORY_STORAGE_KEY);
+      const records: MainHistoryRecord[] = raw ? JSON.parse(raw) : [];
+      setHistoryRecords(records);
+      if (records.length === 0) {
+        setExpandedHistoryId(null);
+      }
+    } catch (error) {
+      console.error("Failed to load history", error);
+      setHistoryError("Unable to load history right now.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  const handleShowHistory = useCallback(() => {
+    loadHistory();
+    setHistoryVisible(true);
+  }, [loadHistory]);
+
+  const handleCloseHistory = useCallback(() => {
+    setHistoryVisible(false);
+    setExpandedHistoryId(null);
+  }, []);
 
   const showCategories = menuState.mode === "categories";
   const showEntries = menuState.mode === "entries";
@@ -272,6 +318,7 @@ const MenuModal: React.FC<MenuModalProps> = ({
                         // Entry counts will update automatically via useEffect
                         (menuState as any).setEntries(entries);
                       }}
+                      onShowHistory={handleShowHistory}
                     />
                   )}
 
@@ -310,6 +357,105 @@ const MenuModal: React.FC<MenuModalProps> = ({
           />
         )}
       </SafeAreaProvider>
+      <Modal
+        visible={historyVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseHistory}
+      >
+        <View style={styles.historyBackdrop}>
+          <SafeAreaView style={styles.historyModal}>
+            <View style={styles.historyHeader}>
+              <TouchableOpacity
+                onPress={handleCloseHistory}
+                style={styles.historyBackButton}
+              >
+                <Ionicons
+                  name="arrow-back"
+                  size={20}
+                  color={colors.textPrimary}
+                />
+              </TouchableOpacity>
+              <Text style={styles.historyTitle}>Main History</Text>
+              <TouchableOpacity
+                onPress={loadHistory}
+                style={styles.historyRefreshButton}
+              >
+                <Ionicons
+                  name="refresh"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+              </TouchableOpacity>
+            </View>
+            {historyLoading ? (
+              <View style={styles.historyLoading}>
+                <ActivityIndicator color={colors.accent} />
+              </View>
+            ) : historyError ? (
+              <View style={styles.historyErrorBox}>
+                <Text style={styles.historyErrorText}>{historyError}</Text>
+              </View>
+            ) : historyRecords.length === 0 ? (
+              <View style={styles.historyEmpty}>
+                <Text style={styles.historyEmptyText}>
+                  No archived conversations yet. Clear the chat to archive it.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView
+                style={styles.historyScroll}
+                contentContainerStyle={styles.historyScrollContent}
+              >
+                {historyRecords.map((record) => {
+                  const expanded = expandedHistoryId === record.id;
+                  return (
+                    <View key={record.id} style={styles.historyCard}>
+                      <TouchableOpacity
+                        onPress={() =>
+                          setExpandedHistoryId(expanded ? null : record.id)
+                        }
+                        style={styles.historyCardHeader}
+                      >
+                        <View>
+                          <Text style={styles.historyCardTitle}>
+                            {new Date(record.timestamp).toLocaleString()}
+                          </Text>
+                          <Text style={styles.historyCardMeta}>
+                            {record.messages.length} messages
+                          </Text>
+                        </View>
+                        <Ionicons
+                          name={expanded ? "chevron-up" : "chevron-down"}
+                          size={18}
+                          color={colors.textSecondary}
+                        />
+                      </TouchableOpacity>
+                      {expanded && (
+                        <View style={styles.historyMessageList}>
+                          {record.messages.slice(0, 20).map((message, index) => (
+                            <View
+                              key={`${record.id}-${index}`}
+                              style={styles.historyMessageRow}
+                            >
+                              <Text style={styles.historyMessageAuthor}>
+                                {message.kind === "bot" ? "Riflett" : "You"}
+                              </Text>
+                              <Text style={styles.historyMessageContent}>
+                                {message.content}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </SafeAreaView>
+        </View>
+      </Modal>
     </Modal>
   );
 };
@@ -409,6 +555,114 @@ const createStyles = (colors: any) =>
       alignItems: "center",
       borderRadius: 8,
       backgroundColor: "transparent",
+    },
+    historyBackdrop: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.5)",
+      justifyContent: "flex-end",
+    },
+    historyModal: {
+      backgroundColor: colors.background,
+      borderTopLeftRadius: radii.lg,
+      borderTopRightRadius: radii.lg,
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.lg,
+      maxHeight: "90%",
+    },
+    historyHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: spacing.md,
+    },
+    historyBackButton: {
+      padding: spacing.sm,
+    },
+    historyRefreshButton: {
+      padding: spacing.sm,
+    },
+    historyTitle: {
+      fontFamily: typography.title.fontFamily,
+      fontSize: 18,
+      color: colors.textPrimary,
+      fontWeight: "600" as const,
+    },
+    historyLoading: {
+      paddingVertical: spacing.xl,
+      alignItems: "center",
+    },
+    historyErrorBox: {
+      paddingVertical: spacing.lg,
+      alignItems: "center",
+    },
+    historyErrorText: {
+      color: colors.error,
+      fontFamily: typography.body.fontFamily,
+    },
+    historyEmpty: {
+      paddingVertical: spacing.lg,
+      alignItems: "center",
+    },
+    historyEmptyText: {
+      fontFamily: typography.body.fontFamily,
+      color: colors.textSecondary,
+      fontSize: 14,
+      textAlign: "center",
+    },
+    historyScroll: {
+      maxHeight: 420,
+    },
+    historyScrollContent: {
+      paddingBottom: spacing.lg,
+    },
+    historyCard: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: radii.md,
+      backgroundColor: colors.surface,
+      marginBottom: spacing.md,
+      overflow: "hidden",
+    },
+    historyCardHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: spacing.md,
+    },
+    historyCardTitle: {
+      fontFamily: typography.body.fontFamily,
+      fontWeight: "600" as const,
+      color: colors.textPrimary,
+      fontSize: 15,
+    },
+    historyCardMeta: {
+      fontFamily: typography.caption.fontFamily,
+      color: colors.textSecondary,
+      fontSize: 12,
+      marginTop: 2,
+    },
+    historyMessageList: {
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      padding: spacing.md,
+      gap: spacing.sm,
+      backgroundColor: colors.surfaceGlass,
+    },
+    historyMessageRow: {
+      borderRadius: radii.sm,
+      backgroundColor: colors.surface,
+      padding: spacing.sm,
+    },
+    historyMessageAuthor: {
+      ...typography.caption,
+      fontSize: 11,
+      color: colors.textSecondary,
+      marginBottom: 2,
+    },
+    historyMessageContent: {
+      ...typography.body,
+      fontSize: 14,
+      color: colors.textPrimary,
     },
   });
 

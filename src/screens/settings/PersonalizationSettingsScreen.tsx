@@ -43,7 +43,7 @@ const PersonalizationSettingsScreen: React.FC<
   if (isEditing) {
     return (
       <OnboardingFlow
-        initialSettings={bundle.settings ?? undefined}
+        initialSettings={bundle.settings ?? null}
         initialTimezone={bundle.profile.timezone}
         onPersist={(state, timezone) => onSave(state, timezone)}
         onComplete={() => {

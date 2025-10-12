@@ -20,6 +20,9 @@ import type { RemoteJournalEntry, EntryType } from "../../services/data";
 import { appendMessage } from "../../services/data";
 import { supabase } from "../../lib/supabase";
 import { generateAIResponse, formatAnnotationLabel } from "../../services/ai";
+import { predictIntent, isEntryChatAllowed } from "../../lib/intent";
+import type { IntentPredictionResult, ProcessingStep } from "../../types/intent";
+import type { ProcessingStepId } from "../../types/intent";
 import { getColors, radii, spacing, typography, shadows } from "../../theme";
 import { useTheme } from "../../contexts/ThemeContext";
 
@@ -37,6 +40,36 @@ interface MenuEntryChatProps {
 }
 
 type ComposerMode = "note" | "ai";
+
+const createProcessingTimeline = (): ProcessingStep[] => [
+  { id: "ml_detection", label: "ML prediction", status: "pending" },
+  { id: "knowledge_search", label: "Knowledge base", status: "pending" },
+  { id: "openai_request", label: "OpenAI request", status: "pending" },
+  { id: "openai_response", label: "OpenAI received", status: "pending" },
+];
+
+const updateTimelineStep = (
+  timeline: ProcessingStep[],
+  stepId: ProcessingStepId,
+  status: ProcessingStep["status"],
+  detail?: string
+): ProcessingStep[] =>
+  timeline.map((step) => {
+    if (step.id !== stepId) {
+      return step;
+    }
+    const next: ProcessingStep = {
+      ...step,
+      status,
+      timestamp: new Date().toISOString(),
+    };
+    if (detail !== undefined) {
+      next.detail = detail;
+    } else {
+      delete next.detail;
+    }
+    return next;
+  });
 
 const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
   entry,
@@ -58,10 +91,17 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
   const [composerText, setComposerText] = useState("");
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [isWorkingWithAI, setIsWorkingWithAI] = useState(false);
+  const [processingSteps, setProcessingSteps] = useState<ProcessingStep[]>([]);
+  const [predictedIntent, setPredictedIntent] =
+    useState<IntentPredictionResult | null>(null);
 
   // Notify parent component when mode changes
   useEffect(() => {
     onModeChange?.(composerMode);
+    if (composerMode === "note") {
+      setProcessingSteps([]);
+      setPredictedIntent(null);
+    }
   }, [composerMode, onModeChange]);
 
   const handleAddNote = useCallback(async () => {
@@ -113,10 +153,68 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     setIsWorkingWithAI(true);
     onErrorUpdate(null);
 
+    let timeline = createProcessingTimeline();
+    setProcessingSteps(timeline);
+
+    const setTimeline = (
+      stepId: ProcessingStepId,
+      status: ProcessingStep["status"],
+      detail?: string
+    ) => {
+      timeline = updateTimelineStep(timeline, stepId, status, detail);
+      setProcessingSteps(timeline);
+    };
+
     try {
+      setTimeline("ml_detection", "running", "Analyzing");
+      const prediction = await predictIntent(trimmed);
+      setPredictedIntent(prediction);
+
+      setTimeline(
+        "ml_detection",
+        "done",
+        `${prediction.rawLabel} ${(prediction.confidence * 100).toFixed(1)}%`
+      );
+
+      if (!isEntryChatAllowed(prediction.id)) {
+        setTimeline(
+          "knowledge_search",
+          "skipped",
+          "Redirect required"
+        );
+        setTimeline(
+          "openai_request",
+          "skipped",
+          "Use main chat"
+        );
+        setTimeline(
+          "openai_response",
+          "skipped",
+          "Intent restricted"
+        );
+        onErrorUpdate(
+          "This intent is managed from Main Chat. Switch surfaces to continue."
+        );
+        Alert.alert(
+          "Open Main Chat",
+          "This type of request is routed through the main chat so Riflett can manage linked data."
+        );
+        return;
+      }
+
+      setTimeline("knowledge_search", "done", "Entry context ready");
+
       const userMessage = await appendMessage(entryId, "user", trimmed, {
         channel: "ai",
         messageKind: "aiQuestion",
+        intent: {
+          id: prediction.id,
+          label: prediction.label,
+          rawLabel: prediction.rawLabel,
+          confidence: prediction.confidence,
+          subsystem: prediction.subsystem,
+        },
+        processingTimeline: timeline,
       });
 
       const userAnnotation: Annotation = {
@@ -126,17 +224,37 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         channel: "ai",
         content: userMessage.content,
         created_at: userMessage.created_at,
+        metadata: {
+          intent: {
+            id: prediction.id,
+            label: prediction.label,
+            confidence: prediction.confidence,
+            subsystem: prediction.subsystem,
+          },
+          processingTimeline: timeline,
+        },
       };
 
       const updatedAnnotations = [...annotations, userAnnotation];
       onAnnotationsUpdate(updatedAnnotations);
+
+      setTimeline("openai_request", "running", "Sending prompt");
 
       const aiResult = await generateAIResponse({
         entryContent: entry.content,
         annotations: updatedAnnotations,
         userMessage: trimmed,
         entryType: entry.type,
+        intentContext: {
+          id: prediction.id,
+          label: prediction.label,
+          confidence: prediction.confidence,
+          subsystem: prediction.subsystem,
+        },
       });
+
+      setTimeline("openai_request", "done", "Prompt dispatched");
+      setTimeline("openai_response", "done", "Response captured");
 
       const botMessage = await appendMessage(
         entryId,
@@ -147,6 +265,14 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
           messageKind: "aiReply",
           learned: aiResult.learned,
           ethical: aiResult.ethical,
+          intent: {
+            id: prediction.id,
+            label: prediction.label,
+            rawLabel: prediction.rawLabel,
+            confidence: prediction.confidence,
+            subsystem: prediction.subsystem,
+          },
+          processingTimeline: timeline,
         }
       );
 
@@ -157,6 +283,16 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         channel: "ai",
         content: botMessage.content,
         created_at: botMessage.created_at,
+        metadata: {
+          learned: aiResult.learned,
+          ethical: aiResult.ethical,
+          intent: {
+            id: prediction.id,
+            label: prediction.label,
+            confidence: prediction.confidence,
+          },
+          processingTimeline: timeline,
+        },
       };
 
       onAnnotationsUpdate([...updatedAnnotations, botAnnotation]);
@@ -164,6 +300,13 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
       setComposerText("");
     } catch (error) {
       console.error("Error requesting AI guidance", error);
+      setTimeline(
+        "openai_response",
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Unable to contact AI"
+      );
       onErrorUpdate(
         error instanceof Error
           ? error.message
@@ -177,7 +320,6 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     composerText,
     entry,
     onAnnotationsUpdate,
-    onAnnotationCountUpdate,
     onErrorUpdate,
   ]);
 
@@ -191,8 +333,8 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
       return (
         <Pressable
           style={({ pressed }) => [
-            styles.noteEntry,
-            pressed && styles.noteEntryPressed,
+            styles.noteEntryWrapper,
+            pressed && styles.noteEntryWrapperPressed,
           ]}
           onLongPress={() => {
             if (item.id) {
@@ -201,14 +343,23 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
           }}
           delayLongPress={500}
         >
-          <View style={styles.noteContent}>
-            <Text style={styles.noteText}>{item.content}</Text>
-            {item.created_at && (
-              <Text style={styles.noteTimestamp}>
-                {new Date(item.created_at).toLocaleDateString()}
-              </Text>
-            )}
-          </View>
+          {({ pressed }) => (
+            <View
+              style={[
+                styles.noteEntryInner,
+                pressed && styles.noteEntryInnerPressed,
+              ]}
+            >
+              <View style={styles.noteContent}>
+                <Text style={styles.noteText}>{item.content}</Text>
+                {item.created_at && (
+                  <Text style={styles.noteTimestamp}>
+                    {new Date(item.created_at).toLocaleDateString()}
+                  </Text>
+                )}
+              </View>
+            </View>
+          )}
         </Pressable>
       );
     }
@@ -223,41 +374,52 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
       >
         <View
           style={[
-            styles.annotationBubble,
-            isUser ? styles.annotationBubbleUser : styles.annotationBubbleOther,
+            styles.annotationBubbleWrapper,
+            isUser
+              ? styles.annotationBubbleWrapperUser
+              : styles.annotationBubbleWrapperOther,
           ]}
         >
-          <Text
+          <View
             style={[
-              styles.annotationLabel,
-              isUser ? styles.annotationLabelUser : styles.annotationLabelOther,
+              styles.annotationBubble,
+              isUser ? styles.annotationBubbleUser : styles.annotationBubbleOther,
             ]}
           >
-            {label}
-          </Text>
-          <Text
-            style={[
-              styles.annotationText,
-              isUser ? styles.annotationTextUser : styles.annotationTextOther,
-            ]}
-          >
-            {item.content}
-          </Text>
-          {item.created_at && (
             <Text
               style={[
-                styles.annotationTimestamp,
+                styles.annotationLabel,
                 isUser
-                  ? styles.annotationTimestampUser
-                  : styles.annotationTimestampOther,
+                  ? styles.annotationLabelUser
+                  : styles.annotationLabelOther,
               ]}
             >
-              {new Date(item.created_at).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+              {label}
             </Text>
-          )}
+            <Text
+              style={[
+                styles.annotationText,
+                isUser ? styles.annotationTextUser : styles.annotationTextOther,
+              ]}
+            >
+              {item.content}
+            </Text>
+            {item.created_at && (
+              <Text
+                style={[
+                  styles.annotationTimestamp,
+                  isUser
+                    ? styles.annotationTimestampUser
+                    : styles.annotationTimestampOther,
+                ]}
+              >
+                {new Date(item.created_at).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </Text>
+            )}
+          </View>
         </View>
       </View>
     );
@@ -419,38 +581,54 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
 
       <View style={styles.noteInputRow}>
         <View style={styles.modeSwitcher}>
-          <TouchableOpacity
+          <Pressable
             onPress={() => setComposerMode("note")}
-            style={[
-              styles.modeButton,
-              composerMode === "note" && styles.modeButtonActive,
+            style={({ pressed }) => [
+              styles.modeButtonWrapper,
+              composerMode === "note" && styles.modeButtonWrapperActive,
+              pressed && styles.modeButtonWrapperPressed,
             ]}
           >
-            <Text
+            <View
               style={[
-                styles.modeButtonText,
-                composerMode === "note" && styles.modeButtonTextActive,
+                styles.modeButton,
+                composerMode === "note" && styles.modeButtonActive,
               ]}
             >
-              Note
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+              <Text
+                style={[
+                  styles.modeButtonText,
+                  composerMode === "note" && styles.modeButtonTextActive,
+                ]}
+              >
+                Note
+              </Text>
+            </View>
+          </Pressable>
+          <Pressable
             onPress={() => setComposerMode("ai")}
-            style={[
-              styles.modeButton,
-              composerMode === "ai" && styles.modeButtonActive,
+            style={({ pressed }) => [
+              styles.modeButtonWrapper,
+              composerMode === "ai" && styles.modeButtonWrapperActive,
+              pressed && styles.modeButtonWrapperPressed,
             ]}
           >
-            <Text
+            <View
               style={[
-                styles.modeButtonText,
-                composerMode === "ai" && styles.modeButtonTextActive,
+                styles.modeButton,
+                composerMode === "ai" && styles.modeButtonActive,
               ]}
             >
-              AI
-            </Text>
-          </TouchableOpacity>
+              <Text
+                style={[
+                  styles.modeButtonText,
+                  composerMode === "ai" && styles.modeButtonTextActive,
+                ]}
+              >
+                AI
+              </Text>
+            </View>
+          </Pressable>
         </View>
         <View style={styles.inputRow}>
           <TextInput
@@ -465,28 +643,61 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
             placeholderTextColor="rgba(244,244,244,0.6)"
             multiline
           />
-          <TouchableOpacity
+          <View
             style={[
-              styles.noteSendButton,
-              ((composerMode === "note" && disableNoteSend) ||
-                (composerMode === "ai" && disableAISend)) &&
-                styles.noteSendButtonDisabled,
+              styles.noteSendWrapper,
+              composerMode === "ai" && styles.noteSendWrapperAI,
             ]}
-            onPress={composerMode === "note" ? handleAddNote : handleAskAI}
-            disabled={composerMode === "note" ? disableNoteSend : disableAISend}
           >
-            <Ionicons
-              name="arrow-up"
-              size={20}
-              color={
-                (composerMode === "note" && disableNoteSend) ||
-                (composerMode === "ai" && disableAISend)
-                  ? colors.textTertiary
-                  : colors.textPrimary
+            <TouchableOpacity
+              style={[
+                styles.noteSendButton,
+                ((composerMode === "note" && disableNoteSend) ||
+                  (composerMode === "ai" && disableAISend)) &&
+                  styles.noteSendButtonDisabled,
+              ]}
+              onPress={
+                composerMode === "note" ? handleAddNote : handleAskAI
               }
-            />
-          </TouchableOpacity>
+              disabled={
+                composerMode === "note" ? disableNoteSend : disableAISend
+              }
+            >
+              <Ionicons
+                name="arrow-up"
+                size={20}
+                color={
+                  (composerMode === "note" && disableNoteSend) ||
+                  (composerMode === "ai" && disableAISend)
+                    ? colors.textTertiary
+                    : colors.textPrimary
+                }
+              />
+            </TouchableOpacity>
+          </View>
         </View>
+        {composerMode === "ai" && predictedIntent && (
+          <Text style={styles.intentSummary}>
+            {`Intent: ${predictedIntent.label} (${Math.round(
+              predictedIntent.confidence * 100
+            )}% confidence)`}
+          </Text>
+        )}
+        {composerMode === "ai" && processingSteps.length > 0 && (
+          <View style={styles.processingRow}>
+            {processingSteps.map((step) => (
+              <View
+                key={step.id}
+                style={[
+                  styles.processingChip,
+                  styles[`processing_${step.status}` as const],
+                ]}
+              >
+                <Text style={styles.processingText}>{step.label}</Text>
+              </View>
+            ))}
+          </View>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -521,18 +732,24 @@ const createStyles = (colors: any, insets: any) =>
       borderTopWidth: 1,
       borderTopColor: colors.border,
     },
-    noteEntry: {
-      backgroundColor: colors.surface,
+    noteEntryWrapper: {
       borderRadius: radii.md,
       marginBottom: spacing.sm,
+      backgroundColor: colors.background,
+      ...shadows.glass,
+    },
+    noteEntryWrapperPressed: {
+      transform: [{ scale: 0.98 }],
+    },
+    noteEntryInner: {
+      backgroundColor: colors.surface,
+      borderRadius: radii.md,
       borderWidth: 1,
       borderColor: colors.border,
       overflow: "hidden",
-      ...shadows.glass,
     },
-    noteEntryPressed: {
+    noteEntryInnerPressed: {
       backgroundColor: colors.surfaceElevated,
-      transform: [{ scale: 0.98 }],
     },
     noteContent: {
       padding: spacing.md,
@@ -630,8 +847,15 @@ const createStyles = (colors: any, insets: any) =>
     annotationRowOther: {
       justifyContent: "flex-start",
     },
-    annotationBubble: {
+    annotationBubbleWrapper: {
       maxWidth: "80%",
+      borderRadius: radii.md,
+      backgroundColor: colors.background,
+      ...shadows.glass,
+    },
+    annotationBubbleWrapperUser: {},
+    annotationBubbleWrapperOther: {},
+    annotationBubble: {
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.md,
       borderRadius: radii.md,
@@ -640,13 +864,11 @@ const createStyles = (colors: any, insets: any) =>
       backgroundColor: colors.surfaceElevated,
       borderWidth: 1,
       borderColor: colors.accent,
-      ...shadows.glass,
     },
     annotationBubbleOther: {
       backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: colors.border,
-      ...shadows.glass,
     },
     annotationLabel: {
       fontFamily: typography.caption.fontFamily,
@@ -700,20 +922,29 @@ const createStyles = (colors: any, insets: any) =>
       flexDirection: "row",
       marginBottom: spacing.sm,
     },
+    modeButtonWrapper: {
+      marginRight: spacing.sm,
+      borderRadius: radii.md,
+      backgroundColor: colors.background,
+      ...shadows.glass,
+    },
+    modeButtonWrapperActive: {
+      ...shadows.glow,
+    },
+    modeButtonWrapperPressed: {
+      transform: [{ scale: 0.98 }],
+    },
     modeButton: {
       paddingVertical: spacing.sm,
       paddingHorizontal: spacing.md,
       borderRadius: radii.md,
       borderWidth: 1,
       borderColor: colors.border,
-      marginRight: spacing.sm,
       backgroundColor: colors.surface,
-      ...shadows.glass,
     },
     modeButtonActive: {
       borderColor: colors.accent,
       backgroundColor: colors.surfaceElevated,
-      ...shadows.glow,
     },
     modeButtonText: {
       fontFamily: typography.button.fontFamily,
@@ -743,6 +974,14 @@ const createStyles = (colors: any, insets: any) =>
       borderColor: colors.border,
       marginRight: spacing.sm,
     },
+    noteSendWrapper: {
+      borderRadius: radii.md,
+      backgroundColor: colors.background,
+      ...shadows.glass,
+    },
+    noteSendWrapperAI: {
+      ...shadows.glow,
+    },
     noteSendButton: {
       backgroundColor: colors.accent,
       borderRadius: radii.md,
@@ -752,11 +991,52 @@ const createStyles = (colors: any, insets: any) =>
       borderColor: colors.accent,
       justifyContent: "center",
       alignItems: "center",
-      ...shadows.glass,
     },
     noteSendButtonDisabled: {
       borderColor: colors.borderLight,
       backgroundColor: colors.surface,
+    },
+    intentSummary: {
+      marginTop: spacing.sm,
+      ...typography.caption,
+      fontSize: 12,
+      color: colors.textSecondary,
+    },
+    processingRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.xs,
+      marginTop: spacing.xs,
+    },
+    processingChip: {
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    processing_pending: {
+      borderColor: colors.border,
+    },
+    processing_running: {
+      borderColor: colors.accent,
+    },
+    processing_done: {
+      borderColor: colors.success,
+    },
+    processing_error: {
+      borderColor: colors.error,
+    },
+    processing_skipped: {
+      borderColor: colors.border,
+      opacity: 0.6,
+    },
+    processingText: {
+      ...typography.caption,
+      fontSize: 10,
+      color: colors.textPrimary,
+      textTransform: "uppercase",
     },
   });
 
