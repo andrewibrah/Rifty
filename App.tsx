@@ -515,9 +515,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_evt, gestureState) => {
-          const { dx, dy } = gestureState;
-          return dx > 20 && Math.abs(dy) < 30;
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (evt, gestureState) => {
+          const { dx, dy, moveX, x0 } = gestureState;
+          const startX = x0 ?? moveX ?? evt.nativeEvent.pageX;
+          const EDGE_ACTIVATION_WIDTH = 48;
+          const isFromEdge = startX <= EDGE_ACTIVATION_WIDTH;
+          const hasHorizontalIntent = dx > 15 && Math.abs(dy) < 30;
+          return isFromEdge && hasHorizontalIntent;
         },
         onPanResponderGrant: () => {
           setIsGestureActive(true);
@@ -640,6 +645,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={styles.listContent}
                 style={styles.messageList}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                 initialNumToRender={10}
                 maxToRenderPerBatch={10}
                 windowSize={10}

@@ -50,6 +50,30 @@ export function buildRoutedIntent(
   const primaryDefinition = getIntentDefinition(primary.label);
   const secondDefinition = second ? getIntentDefinition(second.label) : null;
 
+  const matchedTokensLookup = new Map<string, string[]>();
+  if (Array.isArray(nativeIntent.matchedTokens)) {
+    nativeIntent.matchedTokens.forEach((item) => {
+      if (!item || typeof item.label !== 'string') return;
+      const tokens = Array.isArray(item.tokens) ? item.tokens : [];
+      matchedTokensLookup.set(item.label, tokens);
+    });
+  }
+
+  const resolvedTopK = topK.length ? topK : [primary];
+  const matchedTokens = resolvedTopK.map((candidate) => {
+    const definition = getIntentDefinition(candidate.label);
+    const tokens =
+      matchedTokensLookup.get(definition.label) ??
+      matchedTokensLookup.get(candidate.label) ??
+      [];
+    return {
+      label: toPascalCase(definition.label),
+      tokens,
+    };
+  });
+
+  const runtimeTokens = Array.isArray(nativeIntent.tokens) ? nativeIntent.tokens : null;
+
   return {
     label: toPascalCase(primaryDefinition.label),
     rawLabel: primaryDefinition.label,
@@ -57,7 +81,10 @@ export function buildRoutedIntent(
     secondBest: secondDefinition ? toPascalCase(secondDefinition.label) : null,
     secondConfidence: second ? clamp(second.confidence) : null,
     slots,
-    topK: topK.length ? topK : [primary],
+    topK: resolvedTopK,
+    matchedTokens,
+    ...(nativeIntent.modelVersion ? { modelVersion: nativeIntent.modelVersion } : {}),
+    ...(runtimeTokens ? { tokens: runtimeTokens } : {}),
   };
 }
 

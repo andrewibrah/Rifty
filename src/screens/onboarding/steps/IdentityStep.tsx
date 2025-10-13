@@ -6,12 +6,12 @@ import {
   TextInput,
   TouchableOpacity,
 } from "react-native";
-import { getColors, spacing, radii, typography } from "../../../theme";
-import { useTheme } from "../../../contexts/ThemeContext";
+import { getColors, spacing, radii, typography } from "@/theme";
+import { useTheme } from "@/contexts/ThemeContext";
 import type {
   PersonalizationMode,
   ReflectionCadence,
-} from "../../../types/personalization";
+} from "@/types/personalization";
 
 interface IdentityStepProps {
   timezone: string;

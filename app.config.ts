@@ -1,4 +1,15 @@
 import type { ExpoConfig } from "expo/config";
+import fs from "node:fs";
+import path from "node:path";
+import { config as loadEnv } from "dotenv";
+
+const envFiles = [".env.local", ".env"];
+for (const fileName of envFiles) {
+  const fullPath = path.resolve(__dirname, fileName);
+  if (fs.existsSync(fullPath)) {
+    loadEnv({ path: fullPath, override: false });
+  }
+}
 
 const SUPABASE_URL =
   process.env.EXPO_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";

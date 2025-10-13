@@ -34,10 +34,16 @@ yarn-error.*
 .env
 .env*.local
 
+# active learning artifacts
+active_learning/outbox/*.json
+active_learning/state/*.json
+
+# evaluation reports
+evaluation/intent/reports/*.json
+
 # typescript
 *.tsbuildinfo
 
 # generated native folders
 /ios
 /android
-

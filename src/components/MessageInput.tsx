@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
+  Platform,
   View,
   Text,
   TextInput,
@@ -25,7 +26,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const { themeMode } = useTheme();
   const insets = useSafeAreaInsets();
   const colors = getColors(themeMode);
-  const styles = useMemo(() => createStyles(colors, insets), [colors, insets]);
+  const fallbackBottomInset =
+    insets.bottom || (Platform.OS === "ios" ? 20 : 0);
+  const styles = useMemo(
+    () => createStyles(colors, fallbackBottomInset),
+    [colors, fallbackBottomInset]
+  );
   const [isFocused, setIsFocused] = useState(false);
   const [isUserTyping, setIsUserTyping] = useState(false);
   const inputRef = useRef<TextInput>(null);
@@ -182,11 +188,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
   );
 };
 
-const createStyles = (colors: any, insets: any) =>
+const createStyles = (colors: any, bottomInset: number) =>
   StyleSheet.create({
     wrapper: {
       padding: spacing.lg,
-      paddingBottom: Math.max(spacing.xl, insets.bottom + spacing.md), // Use safe area bottom inset with more padding
+      paddingBottom: Math.max(spacing.xl, bottomInset + spacing.md),
       backgroundColor: colors.background,
     },
     scheduleRow: {

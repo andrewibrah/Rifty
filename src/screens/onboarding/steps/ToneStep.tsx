@@ -7,13 +7,13 @@ import {
   Switch,
   Dimensions,
 } from "react-native";
-import { getColors, spacing, radii, typography } from "../../../theme";
-import { useTheme } from "../../../contexts/ThemeContext";
+import { getColors, spacing, radii, typography } from "@/theme";
+import { useTheme } from "@/contexts/ThemeContext";
 import type {
   LanguageIntensity,
   PersonalizationMode,
   PersonalizationState,
-} from "../../../types/personalization";
+} from "@/types/personalization";
 
 interface ToneStepProps {
   bluntness: number;

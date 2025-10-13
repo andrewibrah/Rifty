@@ -6,12 +6,12 @@ import {
   TouchableOpacity,
   TextInput,
 } from "react-native";
-import { getColors, spacing, radii, typography } from "../../../theme";
-import { useTheme } from "../../../contexts/ThemeContext";
+import { getColors, spacing, radii, typography } from "@/theme";
+import { useTheme } from "@/contexts/ThemeContext";
 import type {
   GoalKey,
   PersonalizationMode,
-} from "../../../types/personalization";
+} from "@/types/personalization";
 
 interface GoalsStepProps {
   selectedGoals: GoalKey[];

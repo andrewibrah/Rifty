@@ -1,8 +1,16 @@
 import React, { useMemo } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  Platform,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { getColors, radii, spacing, typography, shadows } from "../theme";
 import { useTheme } from "../contexts/ThemeContext";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface ChatHeaderProps {
   onHistoryPress: () => void;
@@ -19,7 +27,15 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
 }) => {
   const { themeMode } = useTheme();
   const colors = getColors(themeMode);
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const insets = useSafeAreaInsets();
+  const fallbackTopInset =
+    insets.top ||
+    (Platform.OS === "ios" ? 24 : Math.max(StatusBar.currentHeight ?? 0, 0));
+  const headerTopPadding = fallbackTopInset + spacing.md;
+  const styles = useMemo(
+    () => createStyles(colors, headerTopPadding),
+    [colors, headerTopPadding]
+  );
   return (
     <View style={styles.header}>
       <TouchableOpacity
@@ -63,14 +79,14 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   );
 };
 
-const createStyles = (colors: any) =>
+const createStyles = (colors: any, topPadding: number) =>
   StyleSheet.create({
     header: {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
       paddingHorizontal: spacing.md,
-      paddingTop: spacing.lg,
+      paddingTop: topPadding,
       paddingBottom: spacing.md,
       backgroundColor: colors.background,
     },

@@ -1,8 +1,6 @@
 import React, { createContext, useContext, useMemo } from 'react';
 import {
   Dimensions,
-  Platform,
-  SafeAreaView as RNSafeAreaView,
   View,
   type ViewProps,
   type StyleProp,
@@ -92,12 +90,10 @@ const SafeAreaBaseView: React.FC<SafeAreaViewProps> = ({
     };
   }, [edges, insets.bottom, insets.left, insets.right, insets.top]);
 
-  const ViewComponent = Platform.OS === 'ios' ? RNSafeAreaView : View;
-
   return (
-    <ViewComponent {...rest} style={[paddingStyle, style]}>
+    <View {...rest} style={[paddingStyle, style]}>
       {children}
-    </ViewComponent>
+    </View>
   );
 };
 

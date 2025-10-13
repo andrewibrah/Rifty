@@ -1,0 +1,203 @@
+{
+  "timestamp": "2025-10-13T00:00:00.000Z",
+  "version": "1.0.0",
+  "summary": {
+    "totalFiles": 66,
+    "totalTypeScriptFiles": 66,
+    "totalImports": 124,
+    "avgImportsPerFile": 1.88,
+    "pathAliasUsage": "44.2%",
+    "relativeImports": "55.8%"
+  },
+  "directoryStructure": {
+    "src/agent": {"files": 14, "description": "Intent processing, memory, planner, telemetry"},
+    "src/chat": {"files": 1, "description": "Message handling orchestration"},
+    "src/components": {"files": 13, "description": "React Native UI components"},
+    "src/constants": {"files": 2, "description": "Intent definitions and storage keys"},
+    "src/contexts": {"files": 1, "description": "Theme context provider"},
+    "src/hooks": {"files": 5, "description": "Custom React hooks for state management"},
+    "src/lib": {"files": 3, "description": "Supabase, intent utilities, entry creation"},
+    "src/native": {"files": 1, "description": "Native ML intent classification bridge"},
+    "src/screens": {"files": 10, "description": "Screen components and onboarding flow"},
+    "src/services": {"files": 4, "description": "Data access, AI, personalization, model registry"},
+    "src/theme": {"files": 1, "description": "Design system tokens"},
+    "src/types": {"files": 8, "description": "TypeScript type definitions"},
+    "src/utils": {"files": 3, "description": "String utilities, purging, persona helpers"}
+  },
+  "highFanOut": [
+    {"file": "src/hooks/useChatState.ts", "outgoingDeps": 12, "severity": "critical"},
+    {"file": "src/agent/pipeline.ts", "outgoingDeps": 10, "severity": "critical"},
+    {"file": "src/screens/onboarding/OnboardingFlow.tsx", "outgoingDeps": 9, "severity": "high"},
+    {"file": "src/chat/handleMessage.ts", "outgoingDeps": 5, "severity": "medium"},
+    {"file": "src/lib/entries.ts", "outgoingDeps": 5, "severity": "medium"}
+  ],
+  "highFanIn": [
+    {"file": "src/agent/types.ts", "incomingDeps": 11, "type": "types"},
+    {"file": "src/contexts/ThemeContext.tsx", "incomingDeps": 11, "type": "context"},
+    {"file": "src/theme/index.ts", "incomingDeps": 11, "type": "styles"},
+    {"file": "src/lib/supabase.ts", "incomingDeps": 10, "type": "infrastructure"},
+    {"file": "src/services/data.ts", "incomingDeps": 8, "type": "data-layer"},
+    {"file": "src/agent/memory.ts", "incomingDeps": 6, "type": "agent-core"},
+    {"file": "src/native/intent.ts", "incomingDeps": 5, "type": "ml-core"}
+  ],
+  "circularDependencies": [
+    {
+      "cycle": "agent/planner.ts → services/ai.ts → lib/entries.ts → agent/types.ts",
+      "severity": "medium",
+      "recommendation": "Extract shared types to types/agent-shared.ts"
+    },
+    {
+      "cycle": "agent/pipeline.ts ↔ native/intent.ts",
+      "severity": "low",
+      "recommendation": "Current design is acceptable - clear separation"
+    }
+  ],
+  "relativeImportDepth": {
+    "@/ (alias)": 42,
+    "../ (one level)": 36,
+    "../../../ (three levels)": 9,
+    "../../ (two levels)": 8
+  },
+  "directoryDependencies": [
+    {"from": "hooks", "to": "agent", "count": 8, "risk": "high"},
+    {"from": "hooks", "to": "services", "count": 6, "risk": "medium"},
+    {"from": "components", "to": "theme", "count": 6, "risk": "low"},
+    {"from": "screens", "to": "contexts", "count": 5, "risk": "low"},
+    {"from": "screens", "to": "theme", "count": 5, "risk": "low"},
+    {"from": "components", "to": "contexts", "count": 5, "risk": "low"},
+    {"from": "chat", "to": "agent", "count": 4, "risk": "medium"},
+    {"from": "services", "to": "lib", "count": 3, "risk": "low"},
+    {"from": "agent", "to": "native", "count": 3, "risk": "medium"},
+    {"from": "lib", "to": "agent", "count": 2, "risk": "medium"}
+  ],
+  "duplicatePatterns": [
+    {
+      "pattern": "Date formatting functions",
+      "locations": ["hooks/useChatState.ts", "components/ScheduleCalendarModal.tsx"],
+      "instances": 2,
+      "recommendation": "Create src/utils/date.ts"
+    },
+    {
+      "pattern": "Confidence clamping",
+      "locations": ["native/intent.ts", "agent/intentRouting.ts", "lib/intent.ts"],
+      "instances": 3,
+      "recommendation": "Create src/utils/math.ts with clamp()"
+    },
+    {
+      "pattern": "Theme imports (getColors, radii, spacing, typography)",
+      "locations": "10+ component files",
+      "instances": 10,
+      "recommendation": "Create useStyles() hook"
+    },
+    {
+      "pattern": "AsyncStorage direct usage",
+      "locations": ["agent/memory.ts", "agent/cache.ts", "agent/userConfig.ts", "agent/telemetry.ts", "agent/outbox.ts", "contexts/ThemeContext.tsx", "services/personalization.ts", "lib/supabase.ts", "hooks/useEventLog.ts", "utils/purgeLocal.ts"],
+      "instances": 11,
+      "recommendation": "Create src/lib/storage.ts abstraction"
+    }
+  ],
+  "architecturalIssues": [
+    {
+      "issue": "Layer violation: hooks importing directly from agent/",
+      "severity": "high",
+      "files": ["hooks/useChatState.ts"],
+      "recommendation": "Introduce service layer or facade"
+    },
+    {
+      "issue": "Missing barrel exports for modules",
+      "severity": "medium",
+      "modules": ["agent/", "services/", "lib/"],
+      "recommendation": "Add index.ts to each module for encapsulation"
+    },
+    {
+      "issue": "Deep relative imports (3+ levels)",
+      "severity": "medium",
+      "files": ["screens/onboarding/steps/*.tsx"],
+      "recommendation": "Convert to @/ path aliases"
+    }
+  ],
+  "refactoringPriorities": [
+    {
+      "priority": "P0",
+      "task": "Break down useChatState.ts into smaller hooks",
+      "effort": "High",
+      "impact": "High",
+      "filesAffected": 1
+    },
+    {
+      "priority": "P0",
+      "task": "Convert 3-level relative imports to @/ aliases",
+      "effort": "Low",
+      "impact": "High",
+      "filesAffected": 9
+    },
+    {
+      "priority": "P1",
+      "task": "Extract date formatting utilities",
+      "effort": "Low",
+      "impact": "Medium",
+      "filesAffected": 2
+    },
+    {
+      "priority": "P1",
+      "task": "Extract confidence clamping utility",
+      "effort": "Low",
+      "impact": "Medium",
+      "filesAffected": 3
+    },
+    {
+      "priority": "P1",
+      "task": "Create useStyles() hook",
+      "effort": "Medium",
+      "impact": "High",
+      "filesAffected": 10
+    },
+    {
+      "priority": "P2",
+      "task": "Create storage abstraction",
+      "effort": "Medium",
+      "impact": "Medium",
+      "filesAffected": 11
+    },
+    {
+      "priority": "P2",
+      "task": "Resolve agent ↔ services coupling",
+      "effort": "High",
+      "impact": "Medium",
+      "filesAffected": 4
+    },
+    {
+      "priority": "P3",
+      "task": "Add barrel exports to modules",
+      "effort": "Medium",
+      "impact": "Low",
+      "filesAffected": 20
+    }
+  ],
+  "strengths": [
+    "Type definitions well-centralized (agent/types.ts)",
+    "Data access properly abstracted (lib/supabase.ts, services/data.ts)",
+    "String utilities are DRY (utils/strings.ts)",
+    "Core domain logic isolated in agent/ directory",
+    "Good use of TypeScript strict mode",
+    "Clear separation between native ML and business logic"
+  ],
+  "recommendations": {
+    "immediate": [
+      "Break down src/hooks/useChatState.ts (12 dependencies is too high)",
+      "Convert deep relative imports (../../../) to @/ path aliases",
+      "Run TypeScript strict mode validation"
+    ],
+    "shortTerm": [
+      "Extract date formatting utilities to src/utils/date.ts",
+      "Extract math utilities (clamp) to src/utils/math.ts",
+      "Create useStyles() hook to reduce theme import boilerplate"
+    ],
+    "mediumTerm": [
+      "Create storage abstraction layer",
+      "Resolve circular dependency potential between agent, services, lib",
+      "Add barrel exports to improve module encapsulation",
+      "Implement dependency injection for agent/planner.ts"
+    ]
+  }
+}

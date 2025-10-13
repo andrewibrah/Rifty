@@ -1,8 +1,8 @@
 import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Switch } from "react-native";
-import { getColors, spacing, radii, typography } from "../../../theme";
-import { useTheme } from "../../../contexts/ThemeContext";
-import type { PersonalizationMode } from "../../../types/personalization";
+import { getColors, spacing, radii, typography } from "@/theme";
+import { useTheme } from "@/contexts/ThemeContext";
+import type { PersonalizationMode } from "@/types/personalization";
 
 interface IntroStepProps {
   mode: PersonalizationMode;

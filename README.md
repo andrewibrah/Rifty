@@ -116,6 +116,21 @@ This makes Reflectify a **transparent intelligence**, accountable for its reflec
 
 ---
 
+## 🧪 AI Lifecycle
+
+| Stage | Command | Purpose |
+|-------|---------|---------|
+| **Active learning sync** | `npm run active:sync` | Pull fresh `intent_audits` into `active_learning/outbox/` |
+| **Label queue** | `npm run active:queue` | Generate prioritized review file for human labeling |
+| **Merge labels** | `npm run active:merge` | Append verified labels into `training/intent/data/human_labels.json` |
+| **Train intent model** | `npm run train:intent` | Regenerate `runtime/intent-engine/model.ts` |
+| **Evaluate** | `npm run eval:intent` | Produce accuracy + confusion matrix reports |
+| **Regression test** | `npm run test:intent` | Sanity-check runtime predictions |
+
+> **Supabase support**: migrations add `model_registry` + `model_evaluations` tables for tracking model promotion history. See `codex-docs/founder/deployment-checklist.md` for the full release gate.
+
+---
+
 ## 🌍 Philosophy
 
 Reflectify stands on three principles:

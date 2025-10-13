@@ -6,12 +6,12 @@ import {
   TouchableOpacity,
   Dimensions,
 } from "react-native";
-import { getColors, spacing, radii, typography } from "../../../theme";
-import { useTheme } from "../../../contexts/ThemeContext";
+import { getColors, spacing, radii, typography } from "@/theme";
+import { useTheme } from "@/contexts/ThemeContext";
 import type {
   PersonalizationMode,
   PersonalizationState,
-} from "../../../types/personalization";
+} from "@/types/personalization";
 
 interface WorkingStyleStepProps {
   learningStyle: PersonalizationState["learning_style"];

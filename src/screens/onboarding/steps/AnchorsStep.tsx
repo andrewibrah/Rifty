@@ -1,8 +1,8 @@
 import React from 'react'
 import { View, Text, StyleSheet, Switch, TextInput } from 'react-native'
-import { getColors, spacing, radii, typography } from '../../../theme'
-import { useTheme } from '../../../contexts/ThemeContext'
-import type { DriftRule, PersonalizationMode } from '../../../types/personalization'
+import { getColors, spacing, radii, typography } from '@/theme'
+import { useTheme } from '@/contexts/ThemeContext'
+import type { DriftRule, PersonalizationMode } from '@/types/personalization'
 
 interface AnchorsStepProps {
   driftRule: DriftRule

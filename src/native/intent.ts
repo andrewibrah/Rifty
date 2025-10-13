@@ -1,4 +1,6 @@
 import { NativeModules } from 'react-native';
+import type { RuntimeIntentResult } from '../../runtime/intent-engine/index';
+import { predictRuntimeIntent } from '../../runtime/intent-engine/index';
 
 type NativePredictionPayload = {
   label: string;
@@ -13,6 +15,8 @@ type NativeModuleShape = {
 const { RiflettIntentModule } = NativeModules as {
   RiflettIntentModule?: NativeModuleShape;
 };
+
+let warnedAboutNativeModule = false;
 
 const clampConfidence = (value: number | undefined): number => {
   if (!Number.isFinite(value ?? NaN)) {
@@ -29,27 +33,47 @@ export interface NativeIntentResult {
   confidence: number;
   top3: { label: string; confidence: number }[];
   topK: { label: string; confidence: number }[];
+  modelVersion?: string;
+  matchedTokens?: { label: string; tokens: string[] }[];
+  tokens?: string[];
 }
 
-const buildFallback = (): NativeIntentResult => ({
-  label: 'Journal Entry',
-  confidence: 1,
-  top3: [
-    { label: 'Journal Entry', confidence: 1 },
-    { label: 'Reflection Request', confidence: 0.5 },
-    { label: 'Spaces', confidence: 0.25 },
-  ],
-  topK: [
-    { label: 'Journal Entry', confidence: 1 },
-    { label: 'Reflection Request', confidence: 0.5 },
-    { label: 'Spaces', confidence: 0.25 },
-  ],
-});
+const runtimeToNative = (runtime: RuntimeIntentResult): NativeIntentResult => {
+  const topK = runtime.topK.map((candidate) => ({
+    label: candidate.label,
+    confidence: clampConfidence(candidate.confidence),
+  }));
+  return {
+    label: runtime.primary.label,
+    confidence: clampConfidence(runtime.primary.confidence),
+    top3: topK.slice(0, 3),
+    topK: topK.length > 0 ? topK : [
+      {
+        label: runtime.primary.label,
+        confidence: clampConfidence(runtime.primary.confidence),
+      },
+    ],
+    modelVersion: runtime.modelVersion,
+    matchedTokens: runtime.topK.map((candidate) => ({
+      label: candidate.label,
+      tokens: candidate.matchedTokens,
+    })),
+    tokens: runtime.tokens,
+  };
+};
+
+const buildFallback = (text: string): NativeIntentResult => {
+  const runtime = predictRuntimeIntent(text || '');
+  return runtimeToNative(runtime);
+};
 
 export async function predictIntent(text: string): Promise<NativeIntentResult> {
   if (!RiflettIntentModule || typeof RiflettIntentModule.predict !== 'function') {
-    console.warn('[intent] Native module unavailable, using fallback predictions');
-    return buildFallback();
+    if (!warnedAboutNativeModule) {
+      console.warn('[intent] Native module unavailable, using JS runtime intent engine');
+      warnedAboutNativeModule = true;
+    }
+    return buildFallback(text);
   }
 
   try {
@@ -82,6 +106,6 @@ export async function predictIntent(text: string): Promise<NativeIntentResult> {
     };
   } catch (error) {
     console.warn('[intent] Native prediction failed, using fallback', error);
-    return buildFallback();
+    return buildFallback(text);
   }
 }

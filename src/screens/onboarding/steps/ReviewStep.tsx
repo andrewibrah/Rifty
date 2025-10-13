@@ -1,8 +1,8 @@
 import React from 'react'
 import { View, Text, StyleSheet, Switch } from 'react-native'
-import { getColors, spacing, radii, typography } from '../../../theme'
-import { useTheme } from '../../../contexts/ThemeContext'
-import type { PersonalizationState } from '../../../types/personalization'
+import { getColors, spacing, radii, typography } from '@/theme'
+import { useTheme } from '@/contexts/ThemeContext'
+import type { PersonalizationState } from '@/types/personalization'
 
 interface ReviewStepProps {
   state: PersonalizationState

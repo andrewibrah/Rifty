@@ -5,32 +5,62 @@ const SQLITE_DB_NAME = 'riflett-memory.db';
 const STORAGE_KEY = 'riflett_memory_store';
 const MAX_CACHED_ROWS = 512;
 
-type SQLiteDatabase = {
-  transaction: (
-    callback: (tx: SQLiteTransaction) => void,
-    error?: (error: Error) => void,
-    success?: () => void
-  ) => void;
-};
-
-type SQLiteTransaction = {
-  executeSql: (
-    sql: string,
-    params: any[],
-    success?: (tx: SQLiteTransaction, result: SQLiteResultSet) => void,
-    error?: (tx: SQLiteTransaction, error: Error) => boolean
-  ) => void;
-};
-
 type SQLiteResultSet = {
   rows: {
     length: number;
     item: (index: number) => any;
     _array: any[];
   };
+  rowsAffected?: number | undefined;
+  insertId?: number | undefined;
 };
 
+type LegacySQLiteTransaction = {
+  executeSql: (
+    sql: string,
+    params: any[],
+    success?: (tx: LegacySQLiteTransaction, result: SQLiteResultSet) => void,
+    error?: (tx: LegacySQLiteTransaction, error: Error) => boolean
+  ) => void;
+};
+
+type LegacySQLiteDatabase = {
+  transaction: (
+    callback: (tx: LegacySQLiteTransaction) => void,
+    error?: (error: Error) => void,
+    success?: () => void
+  ) => void;
+};
+
+type ModernSQLiteExecuteResult<T = any> = {
+  getAllAsync: () => Promise<T[]>;
+  getFirstAsync: () => Promise<T | null>;
+  resetAsync: () => Promise<void>;
+  readonly changes: number;
+  readonly lastInsertRowId: number;
+};
+
+type ModernSQLiteStatement = {
+  executeAsync: (...params: any[]) => Promise<ModernSQLiteExecuteResult>;
+  finalizeAsync: () => Promise<void>;
+};
+
+type ModernSQLiteDatabase = {
+  prepareAsync: (sql: string) => Promise<ModernSQLiteStatement>;
+};
+
+type ExpoSqliteModule = Partial<
+  {
+    openDatabase: (name: string) => LegacySQLiteDatabase;
+    openDatabaseAsync: (name: string) => Promise<ModernSQLiteDatabase>;
+    openDatabaseSync: (name: string) => ModernSQLiteDatabase;
+  }
+>;
+
+type SQLiteDatabase = LegacySQLiteDatabase | ModernSQLiteDatabase;
+
 let sqliteDb: SQLiteDatabase | null = null;
+let sqliteFlavor: 'legacy' | 'modern' | null = null;
 let sqliteReady = false;
 let initialized: Promise<void> | null = null;
 
@@ -64,34 +94,118 @@ interface UpsertOptions {
   embedding?: number[];
 }
 
-const executeSql = (sql: string, params: any[] = []): Promise<SQLiteResultSet | null> => {
-  if (!sqliteDb) return Promise.resolve(null);
-  return new Promise((resolve, reject) => {
-    sqliteDb!.transaction(
-      (tx) => {
-        tx.executeSql(
-          sql,
-          params,
-          (_tx, result) => {
-            resolve(result);
-          },
-          (_tx, error) => {
-            reject(error);
-            return false;
-          }
-        );
-      },
-      (error) => reject(error)
-    );
-  });
+const executeSql = async (sql: string, params: any[] = []): Promise<SQLiteResultSet | null> => {
+  if (!sqliteDb) return null;
+
+  if (sqliteFlavor === 'legacy' && sqliteDb && isLegacyDatabase(sqliteDb)) {
+    const legacyDb = sqliteDb;
+    return new Promise((resolve, reject) => {
+      legacyDb.transaction(
+        (tx: LegacySQLiteTransaction) => {
+          tx.executeSql(
+            sql,
+            params,
+            (_tx: LegacySQLiteTransaction, result: SQLiteResultSet) => {
+              resolve(result);
+            },
+            (_tx: LegacySQLiteTransaction, error: Error) => {
+              reject(error);
+              return false;
+            }
+          );
+        },
+        (error: Error) => reject(error)
+      );
+    });
+  }
+
+  if (sqliteFlavor === 'modern' && sqliteDb && isModernDatabase(sqliteDb)) {
+    const modernDb = sqliteDb;
+    let statement: ModernSQLiteStatement | null = null;
+    try {
+      statement = await modernDb.prepareAsync(sql);
+      const iterator = await statement.executeAsync(params);
+      const rowsArray = await iterator.getAllAsync();
+      const result: SQLiteResultSet = {
+        rows: {
+          length: rowsArray.length,
+          item: (index: number) => rowsArray[index],
+          _array: rowsArray,
+        },
+      };
+      if (typeof iterator.changes === 'number') {
+        result.rowsAffected = iterator.changes;
+      }
+      if (typeof iterator.lastInsertRowId === 'number' && Number.isFinite(iterator.lastInsertRowId)) {
+        result.insertId = iterator.lastInsertRowId;
+      }
+      return result;
+    } finally {
+      if (statement) {
+        try {
+          await statement.finalizeAsync();
+        } catch (finalizeError) {
+          console.warn('[memory] Failed to finalize SQLite statement', finalizeError);
+        }
+      }
+    }
+  }
+
+  return null;
 };
+
+const loadSqliteModule = (): ExpoSqliteModule | null => {
+  try {
+    // Use CommonJS require to avoid Metro async shim.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+    return require('expo-sqlite') as ExpoSqliteModule;
+  } catch (primaryError) {
+    try {
+      // Some older SDKs expose the legacy entrypoint.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+      return require('expo-sqlite/legacy') as ExpoSqliteModule;
+    } catch (legacyError) {
+      console.warn('[memory] expo-sqlite unavailable', primaryError);
+      console.warn('[memory] expo-sqlite legacy fallback unavailable', legacyError);
+      return null;
+    }
+  }
+};
+
+const isLegacyDatabase = (db: SQLiteDatabase): db is LegacySQLiteDatabase =>
+  typeof (db as LegacySQLiteDatabase).transaction === 'function';
+
+const isModernDatabase = (db: SQLiteDatabase): db is ModernSQLiteDatabase =>
+  typeof (db as ModernSQLiteDatabase).prepareAsync === 'function';
 
 const tryInitSqlite = async (): Promise<boolean> => {
   if (sqliteReady) return true;
 
   try {
-    const sqliteModule = await import('expo-sqlite/legacy');
-    sqliteDb = sqliteModule.openDatabase(SQLITE_DB_NAME);
+    const sqliteModule = loadSqliteModule();
+    if (!sqliteModule) {
+      sqliteDb = null;
+      sqliteFlavor = null;
+      sqliteReady = false;
+      return false;
+    }
+    if (typeof sqliteModule.openDatabaseAsync === 'function') {
+      sqliteDb = await sqliteModule.openDatabaseAsync(SQLITE_DB_NAME);
+    } else if (typeof sqliteModule.openDatabaseSync === 'function') {
+      sqliteDb = sqliteModule.openDatabaseSync(SQLITE_DB_NAME);
+    } else if (typeof sqliteModule.openDatabase === 'function') {
+      sqliteDb = sqliteModule.openDatabase(SQLITE_DB_NAME);
+    } else {
+      throw new Error('expo-sqlite module does not expose an openDatabase function');
+    }
+
+    if (sqliteDb && isModernDatabase(sqliteDb)) {
+      sqliteFlavor = 'modern';
+    } else if (sqliteDb && isLegacyDatabase(sqliteDb)) {
+      sqliteFlavor = 'legacy';
+    } else {
+      throw new Error('expo-sqlite returned an unsupported database instance');
+    }
 
     await executeSql(
       'CREATE TABLE IF NOT EXISTS memory (id TEXT PRIMARY KEY, kind TEXT, text TEXT, ts INTEGER, embedding TEXT)'
@@ -117,8 +231,9 @@ const tryInitSqlite = async (): Promise<boolean> => {
     sqliteReady = true;
     return true;
   } catch (error) {
-    console.warn('[memory] SQLite unavailable, using AsyncStorage fallback', error);
+    console.warn('[memory] SQLite init failed, using AsyncStorage fallback', error);
     sqliteDb = null;
+    sqliteFlavor = null;
     sqliteReady = false;
     return false;
   }

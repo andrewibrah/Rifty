@@ -6,6 +6,9 @@ export interface RoutedIntent {
   secondConfidence?: number | null;
   slots: Record<string, string>;
   topK: { label: string; confidence: number }[];
+  modelVersion?: string;
+  matchedTokens?: { label: string; tokens: string[] }[];
+  tokens?: string[];
 }
 
 export type RouteDecision =

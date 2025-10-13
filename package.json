@@ -9,6 +9,12 @@
     "web": "expo start --web",
     "health": "ts-node scripts/health.ts",
     "scan:secrets": "node scripts/scan-secrets.js",
+    "train:intent": "ts-node --compiler-options '{\"module\":\"commonjs\"}' training/intent/trainIntentModel.ts",
+    "eval:intent": "ts-node --compiler-options '{\"module\":\"commonjs\"}' evaluation/intent/evaluateIntentModel.ts",
+    "test:intent": "ts-node --compiler-options '{\"module\":\"commonjs\"}' tests/intent-runtime.test.ts",
+    "active:sync": "ts-node active_learning/syncIntentAudits.ts",
+    "active:queue": "ts-node active_learning/buildLabelQueue.ts",
+    "active:merge": "ts-node active_learning/mergeLabels.ts",
     "postinstall": "patch-package || true"
   },
   "dependencies": {
