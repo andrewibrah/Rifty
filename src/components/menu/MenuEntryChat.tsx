@@ -780,6 +780,7 @@ const createStyles = (colors: any, insets: any) =>
     },
     entrySummary: {
       paddingVertical: spacing.md,
+      marginTop: spacing.lg,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
       marginBottom: spacing.md,

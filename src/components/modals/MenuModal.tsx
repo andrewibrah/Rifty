@@ -362,6 +362,7 @@ const createStyles = (colors: any) =>
       paddingHorizontal: spacing.md,
       paddingTop: spacing.lg,
       paddingBottom: spacing.sm,
+      marginTop: spacing.lg,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
       minHeight: 80,
