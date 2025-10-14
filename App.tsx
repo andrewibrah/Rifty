@@ -1,4 +1,4 @@
-import 'react-native-gesture-handler';
+import "react-native-gesture-handler";
 
 import React, {
   useCallback,
@@ -30,17 +30,21 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView, SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import type { Session } from "@supabase/supabase-js";
-import ChatHeader from "./src/components/ChatHeader";
-import MessageBubble from "./src/components/MessageBubble";
-import TypingIndicator from "./src/components/TypingIndicator";
-import MessageInput from "./src/components/MessageInput";
-import MenuModal from "./src/components/MenuModal";
+import ChatHeader from "./src/components/chat/ChatHeader";
+import MessageBubble from "./src/components/chat/MessageBubble";
+import TypingIndicator from "./src/components/chat/TypingIndicator";
+import MessageInput from "./src/components/chat/MessageInput";
+import MenuModal from "./src/components/modals/MenuModal";
 import SettingsScreen from "./src/screens/SettingsScreen";
-import ScheduleCalendarModal from "./src/components/ScheduleCalendarModal";
+import ScheduleCalendarModal from "./src/components/modals/ScheduleCalendarModal";
 import OnboardingFlow from "./src/screens/onboarding/OnboardingFlow";
 import PersonalizationSettingsScreen from "./src/screens/settings/PersonalizationSettingsScreen";
 import Auth from "./src/components/Auth";
-import { useChatState, type IntentReviewTicket } from "./src/hooks/useChatState";
+import IntentReviewModal from "./src/components/modals/IntentReviewModal";
+import {
+  useChatState,
+  type IntentReviewTicket,
+} from "./src/hooks/useChatState";
 import { useMenuState } from "./src/hooks/useMenuState";
 import type { ChatMessage, MessageGroup } from "./src/types/chat";
 import type { MainHistoryRecord } from "./src/types/history";
@@ -115,13 +119,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   const [currentScreen, setCurrentScreen] = useState<
     "chat" | "settings" | "personalization"
   >("chat");
-  const [intentReviewQueue, setIntentReviewQueue] = useState<IntentReviewTicket[]>([]);
-  const [activeIntentReview, setActiveIntentReview] = useState<
-    IntentReviewTicket | null
-  >(null);
-  const [customIntentValue, setCustomIntentValue] = useState("");
-  const [isSubmittingIntentFeedback, setIsSubmittingIntentFeedback] =
-    useState(false);
+  const [intentReviewQueue, setIntentReviewQueue] = useState<
+    IntentReviewTicket[]
+  >([]);
+  const [activeIntentReview, setActiveIntentReview] =
+    useState<IntentReviewTicket | null>(null);
 
   const splashOpacity = useRef(new Animated.Value(1)).current;
   const flameTranslate = useRef(new Animated.Value(0)).current;
@@ -182,27 +184,31 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     if (!nextReview) return;
     setActiveIntentReview(nextReview);
     setIntentReviewQueue(rest);
-    setCustomIntentValue("");
   }, [activeIntentReview, intentReviewQueue]);
 
   useEffect(() => {
     Memory.warmup().catch((error) => {
-      console.warn('[memory] warmup failed', error);
+      console.warn("[memory] warmup failed", error);
     });
   }, []);
 
   const handleSend = async () => {
-    const trimmed = content.trim();
-    if (!trimmed) return;
-    const review = await sendMessage(trimmed);
-    setContent("");
-    if (review) {
-      setIntentReviewQueue((prev) => [...prev, review]);
-    }
+    try {
+      const trimmed = content.trim();
+      if (!trimmed) return;
+      const review = await sendMessage(trimmed);
+      setContent("");
+      if (review) {
+        setIntentReviewQueue((prev) => [...prev, review]);
+      }
 
-    requestAnimationFrame(() => {
-      listRef.current?.scrollToEnd({ animated: true });
-    });
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToEnd({ animated: true });
+      });
+    } catch (error) {
+      console.error("[ChatScreen] handleSend failed", error);
+      // Don't clear content on error so user can retry
+    }
   };
 
   const handleRetry = (messageId: string) => {
@@ -282,189 +288,65 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     );
   }, [archiveConversation, clearMessages]);
 
-  const submitIntentFeedback = useCallback(
-    async (correctIntent: string, displayLabel?: string) => {
-      if (!activeIntentReview) return;
-      setIsSubmittingIntentFeedback(true);
-      try {
-        await logIntentAudit({
-          entryId: activeIntentReview.messageId,
-          prompt: activeIntentReview.content,
-          predictedIntent: activeIntentReview.intent.id,
-          correctIntent,
-        });
-
-        if (correctIntent !== "unknown") {
-          const isCustom = correctIntent.startsWith("custom:");
-          const baseDefinition = getIntentById(
-            (isCustom ? "unknown" : correctIntent) as AppIntent
-          );
-          const label = (displayLabel ?? (isCustom
+  const handleIntentConfirm = useCallback(
+    (messageId: string, correctIntent: string, displayLabel?: string) => {
+      if (correctIntent !== "unknown") {
+        const isCustom = correctIntent.startsWith("custom:");
+        const baseDefinition = getIntentById(
+          (isCustom ? "unknown" : correctIntent) as AppIntent
+        );
+        const label = (
+          displayLabel ??
+          (isCustom
             ? correctIntent
                 .replace(/^custom:/, "")
                 .replace(/[-_]+/g, " ")
                 .trim() || "Custom Intent"
-            : baseDefinition.label)).trim();
-          const metaId = isCustom
-            ? ("unknown" as AppIntent)
-            : (correctIntent as AppIntent);
-          const confidence =
-            correctIntent === activeIntentReview.intent.id
-              ? activeIntentReview.intent.confidence
-              : 1;
+            : baseDefinition.label)
+        ).trim();
+        const metaId = isCustom
+          ? ("unknown" as AppIntent)
+          : (correctIntent as AppIntent);
+        const confidence =
+          activeIntentReview && correctIntent === activeIntentReview.intent.id
+            ? activeIntentReview.intent.confidence
+            : 1;
 
-          const probabilities = {
-            ...activeIntentReview.intent.probabilities,
-            [label]:
-              correctIntent === activeIntentReview.intent.id
-                ? activeIntentReview.intent.probabilities[label] ?? confidence
-                : 1,
-          };
+        const probabilities = activeIntentReview
+          ? {
+              ...activeIntentReview.intent.probabilities,
+              [label]:
+                correctIntent === activeIntentReview.intent.id
+                  ? (activeIntentReview.intent.probabilities[label] ??
+                    confidence)
+                  : 1,
+            }
+          : {};
 
-          const meta = {
-            id: metaId,
-            rawLabel: label,
-            displayLabel: label,
-            confidence,
-            subsystem: baseDefinition.subsystem,
-            probabilities,
-          };
+        const meta = {
+          id: metaId,
+          rawLabel: label,
+          displayLabel: label,
+          confidence,
+          subsystem: baseDefinition.subsystem,
+          probabilities,
+        };
 
-          const resolvedType =
-            baseDefinition.entryType ?? activeIntentReview.entryType;
+        const resolvedType = activeIntentReview
+          ? (baseDefinition.entryType ?? activeIntentReview.entryType)
+          : "journal";
 
-          updateMessageIntent(activeIntentReview.messageId, meta, resolvedType);
-        }
-
-        setActiveIntentReview(null);
-        setCustomIntentValue("");
-      } catch (error) {
-        Alert.alert(
-          "Intent feedback failed",
-          error instanceof Error
-            ? error.message
-            : "Unable to record feedback right now."
-        );
-      } finally {
-        setIsSubmittingIntentFeedback(false);
+        updateMessageIntent(messageId, meta, resolvedType);
       }
+
+      setActiveIntentReview(null);
     },
     [activeIntentReview, updateMessageIntent]
   );
 
-  const handleSubmitCustomIntent = useCallback(() => {
-    const value = customIntentValue.trim();
-    if (!value) {
-      return;
-    }
-    const customId = `custom:${value
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")}`;
-    submitIntentFeedback(customId, value);
-  }, [customIntentValue, submitIntentFeedback]);
-
-  const handleSkipIntentReview = useCallback(() => {
-    submitIntentFeedback("unknown");
-  }, [submitIntentFeedback]);
-
-  const renderIntentReviewModal = () => {
-    if (!activeIntentReview) return null;
-
-    const predictedDefinition = getIntentById(
-      activeIntentReview.intent.id as AppIntent
-    );
-
-    return (
-      <Modal transparent animationType="fade" visible>
-        <View style={styles.intentModalBackdrop}>
-          <View style={styles.intentModalCard}>
-            <Text style={styles.intentModalTitle}>Confirm intent</Text>
-            <Text style={styles.intentModalMessage}>
-              {activeIntentReview.content}
-            </Text>
-            <View style={styles.intentPredictedBox}>
-              <Text style={styles.intentPredictedLabel}>Predicted</Text>
-              <Text style={styles.intentPredictedValue}>
-                {predictedDefinition.label}
-              </Text>
-              <Text style={styles.intentPredictedConfidence}>{`${Math.round(
-                activeIntentReview.intent.confidence * 100
-              )}% confidence`}</Text>
-              <TouchableOpacity
-                style={[
-                  styles.intentActionButton,
-                  styles.intentConfirmButton,
-                  isSubmittingIntentFeedback && styles.intentButtonDisabled,
-                ]}
-                onPress={() =>
-                  submitIntentFeedback(activeIntentReview.intent.id)
-                }
-                disabled={isSubmittingIntentFeedback}
-              >
-                <Text style={styles.intentActionButtonText}>Correct</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.intentOptionsHeader}>Select intent</Text>
-            <ScrollView style={styles.intentOptionsList}>
-              {allIntentDefinitions
-                .filter((definition) => definition.id !== activeIntentReview.intent.id)
-                .map((definition) => (
-                  <TouchableOpacity
-                    key={definition.id}
-                    style={styles.intentOptionRow}
-                    onPress={() => submitIntentFeedback(definition.id)}
-                    disabled={isSubmittingIntentFeedback}
-                  >
-                    <View>
-                      <Text style={styles.intentOptionLabel}>
-                        {definition.label}
-                      </Text>
-                      <Text style={styles.intentOptionMeta}>
-                        {definition.subsystem.toUpperCase()}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-            </ScrollView>
-            <View style={styles.intentCustomRow}>
-              <TextInput
-                style={styles.intentCustomInput}
-                value={customIntentValue}
-                onChangeText={setCustomIntentValue}
-                placeholder="Custom intent"
-                placeholderTextColor="rgba(255,255,255,0.5)"
-              />
-              <TouchableOpacity
-                style={[
-                  styles.intentActionButton,
-                  styles.intentSubmitButton,
-                  (isSubmittingIntentFeedback || !customIntentValue.trim()) &&
-                    styles.intentButtonDisabled,
-                ]}
-                onPress={handleSubmitCustomIntent}
-                disabled={
-                  isSubmittingIntentFeedback || !customIntentValue.trim()
-                }
-              >
-                <Text style={styles.intentActionButtonText}>Submit</Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity
-              style={[
-                styles.intentSkipButton,
-                isSubmittingIntentFeedback && styles.intentButtonDisabled,
-              ]}
-              onPress={handleSkipIntentReview}
-              disabled={isSubmittingIntentFeedback}
-            >
-              <Text style={styles.intentSkipText}>Skip for now</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    );
-  };
+  const handleIntentModalClose = useCallback(() => {
+    setActiveIntentReview(null);
+  }, []);
 
   const animateMainContent = useCallback(
     (toValue: number) => {
@@ -646,7 +528,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 contentContainerStyle={styles.listContent}
                 style={styles.messageList}
                 keyboardShouldPersistTaps="handled"
-                keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+                keyboardDismissMode={
+                  Platform.OS === "ios" ? "interactive" : "on-drag"
+                }
                 initialNumToRender={10}
                 maxToRenderPerBatch={10}
                 windowSize={10}
@@ -686,7 +570,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         onClose={handleCalendarClose}
       />
 
-      {renderIntentReviewModal()}
+      <IntentReviewModal
+        visible={!!activeIntentReview}
+        review={activeIntentReview}
+        onClose={handleIntentModalClose}
+        onConfirm={handleIntentConfirm}
+      />
 
       {isSplashVisible && (
         <Animated.View
@@ -775,128 +664,6 @@ const createStyles = (colors: any) =>
     splashLogo: {
       width: 120,
       height: 120,
-    },
-    intentModalBackdrop: {
-      position: "absolute",
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: "rgba(0,0,0,0.6)",
-      justifyContent: "center",
-      alignItems: "center",
-      padding: spacing.lg,
-    },
-    intentModalCard: {
-      width: "100%",
-      maxWidth: 420,
-      backgroundColor: colors.surfaceElevated,
-      borderRadius: radii.lg,
-      padding: spacing.lg,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    intentModalTitle: {
-      ...typography.title,
-      fontSize: 20,
-      color: colors.textPrimary,
-      marginBottom: spacing.sm,
-    },
-    intentModalMessage: {
-      ...typography.body,
-      color: colors.textSecondary,
-      marginBottom: spacing.md,
-    },
-    intentPredictedBox: {
-      padding: spacing.md,
-      backgroundColor: colors.surface,
-      borderRadius: radii.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      marginBottom: spacing.lg,
-    },
-    intentPredictedLabel: {
-      ...typography.caption,
-      color: colors.textSecondary,
-      marginBottom: spacing.xs,
-    },
-    intentPredictedValue: {
-      ...typography.title,
-      fontSize: 18,
-      color: colors.textPrimary,
-    },
-    intentPredictedConfidence: {
-      ...typography.caption,
-      color: colors.textSecondary,
-      marginTop: spacing.xs,
-    },
-    intentActionButton: {
-      marginTop: spacing.sm,
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.md,
-      borderRadius: radii.pill,
-      alignItems: "center",
-    },
-    intentButtonDisabled: {
-      opacity: 0.5,
-    },
-    intentConfirmButton: {
-      backgroundColor: colors.accent,
-    },
-    intentSubmitButton: {
-      backgroundColor: colors.accent,
-    },
-    intentActionButtonText: {
-      ...typography.button,
-      color: colors.textPrimary,
-    },
-    intentOptionsHeader: {
-      ...typography.caption,
-      textTransform: "uppercase",
-      color: colors.textSecondary,
-      marginBottom: spacing.xs,
-    },
-    intentOptionsList: {
-      maxHeight: 180,
-      marginBottom: spacing.md,
-    },
-    intentOptionRow: {
-      paddingVertical: spacing.sm,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
-    },
-    intentOptionLabel: {
-      ...typography.body,
-      color: colors.textPrimary,
-    },
-    intentOptionMeta: {
-      ...typography.caption,
-      color: colors.textSecondary,
-      marginTop: 2,
-    },
-    intentCustomRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.sm,
-      marginBottom: spacing.sm,
-    },
-    intentCustomInput: {
-      flex: 1,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: radii.sm,
-      paddingHorizontal: spacing.sm,
-      paddingVertical: spacing.xs,
-      color: colors.textPrimary,
-      backgroundColor: colors.surface,
-    },
-    intentSkipButton: {
-      alignItems: "center",
-      paddingVertical: spacing.sm,
-    },
-    intentSkipText: {
-      ...typography.caption,
-      color: colors.textSecondary,
     },
   });
 

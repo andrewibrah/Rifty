@@ -10,11 +10,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { getColors, radii, spacing, typography, shadows } from "../theme";
-import { useTheme } from "../contexts/ThemeContext";
-import { listJournals, type RemoteJournalEntry } from "../services/data";
-import MenuEntryChat from "./menu/MenuEntryChat";
-import { useEntryChat } from "../hooks/useEntryChat";
+import { getColors, radii, spacing, typography, shadows } from "../../theme";
+import { useTheme } from "../../contexts/ThemeContext";
+import { listJournals, type RemoteJournalEntry } from "../../services/data";
+import MenuEntryChat from "../menu/MenuEntryChat";
+import { useEntryChat } from "../../hooks/useEntryChat";
 
 interface ScheduleCalendarModalProps {
   visible: boolean;

@@ -2,9 +2,9 @@ import React, { useMemo } from "react";
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { supabase } from "../lib/supabase";
-import { getColors, radii, spacing, typography } from "../theme";
-import { useTheme } from "../contexts/ThemeContext";
+import { supabase } from "../../lib/supabase";
+import { getColors, radii, spacing, typography } from "../../theme";
+import { useTheme } from "../../contexts/ThemeContext";
 import type { Session } from "@supabase/supabase-js";
 
 interface SettingsModalProps {

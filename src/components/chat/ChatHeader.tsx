@@ -8,8 +8,8 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { getColors, radii, spacing, typography, shadows } from "../theme";
-import { useTheme } from "../contexts/ThemeContext";
+import { getColors, radii, spacing, typography, shadows } from "../../theme";
+import { useTheme } from "../../contexts/ThemeContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface ChatHeaderProps {

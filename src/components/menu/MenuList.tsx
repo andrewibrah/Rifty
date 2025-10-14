@@ -9,14 +9,14 @@ import {
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import type { EntryType, RemoteJournalEntry } from "../services/data";
+import type { EntryType, RemoteJournalEntry } from "../../services/data";
 import {
   deleteJournalEntry,
   listJournals,
   deleteAllEntriesByType,
-} from "../services/data";
-import { getColors, radii, spacing, typography } from "../theme";
-import { useTheme } from "../contexts/ThemeContext";
+} from "../../services/data";
+import { getColors, radii, spacing, typography } from "../../theme";
+import { useTheme } from "../../contexts/ThemeContext";
 
 interface MenuListProps {
   mode: "categories" | "entries" | "entryChat";
@@ -215,11 +215,7 @@ const MenuList: React.FC<MenuListProps> = ({
           onPress={onShowHistory ?? (() => undefined)}
         >
           <View style={styles.categoryIconContainer}>
-            <Ionicons
-              name="time-outline"
-              size={18}
-              color={colors.accent}
-            />
+            <Ionicons name="time-outline" size={18} color={colors.accent} />
           </View>
           <View style={styles.categoryTextContainer}>
             <Text style={styles.categoryButtonText}>Main History</Text>

@@ -1,7 +1,7 @@
-import { getIntentDefinition } from '@/constants/intents';
-import type { NativeIntentResult } from '@/native/intent';
-import { toSnakeCase, toPascalCase } from '@/utils/strings';
-import type { RouteDecision, RoutedIntent } from './types';
+import { getIntentDefinition } from "@/constants/intents";
+import type { NativeIntentResult } from "@/native/intent";
+import { toSnakeCase, toPascalCase } from "@/utils/strings";
+import type { RouteDecision, RoutedIntent } from "./types";
 
 export const ROUTE_AT_THRESHOLD = 0.75;
 export const CLARIFY_LOWER_THRESHOLD = 0.45;
@@ -20,12 +20,18 @@ const clamp = (value: number): number => {
   return value;
 };
 
-const normalizeTopK = (nativeTopK: ScoredLabel[] | undefined): ScoredLabel[] => {
+const normalizeTopK = (
+  nativeTopK: ScoredLabel[] | undefined
+): ScoredLabel[] => {
   if (!Array.isArray(nativeTopK)) return [];
   const seen = new Set<string>();
   return nativeTopK
     .filter((item): item is ScoredLabel =>
-      Boolean(item && typeof item.label === 'string' && typeof item.confidence === 'number')
+      Boolean(
+        item &&
+          typeof item.label === "string" &&
+          typeof item.confidence === "number"
+      )
     )
     .map((item) => ({
       label: item.label,
@@ -44,7 +50,10 @@ export function buildRoutedIntent(
   slots: Record<string, string> = {}
 ): RoutedIntent {
   const topK = normalizeTopK(nativeIntent.topK ?? nativeIntent.top3);
-  const primary = topK[0] ?? { label: nativeIntent.label, confidence: clamp(nativeIntent.confidence) };
+  const primary = topK[0] ?? {
+    label: nativeIntent.label,
+    confidence: clamp(nativeIntent.confidence),
+  };
 
   const second = topK.find((candidate) => candidate.label !== primary.label);
   const primaryDefinition = getIntentDefinition(primary.label);
@@ -53,7 +62,7 @@ export function buildRoutedIntent(
   const matchedTokensLookup = new Map<string, string[]>();
   if (Array.isArray(nativeIntent.matchedTokens)) {
     nativeIntent.matchedTokens.forEach((item) => {
-      if (!item || typeof item.label !== 'string') return;
+      if (!item || typeof item.label !== "string") return;
       const tokens = Array.isArray(item.tokens) ? item.tokens : [];
       matchedTokensLookup.set(item.label, tokens);
     });
@@ -72,7 +81,9 @@ export function buildRoutedIntent(
     };
   });
 
-  const runtimeTokens = Array.isArray(nativeIntent.tokens) ? nativeIntent.tokens : null;
+  const runtimeTokens = Array.isArray(nativeIntent.tokens)
+    ? nativeIntent.tokens
+    : null;
 
   return {
     label: toPascalCase(primaryDefinition.label),
@@ -83,7 +94,9 @@ export function buildRoutedIntent(
     slots,
     topK: resolvedTopK,
     matchedTokens,
-    ...(nativeIntent.modelVersion ? { modelVersion: nativeIntent.modelVersion } : {}),
+    ...(nativeIntent.modelVersion
+      ? { modelVersion: nativeIntent.modelVersion }
+      : {}),
     ...(runtimeTokens ? { tokens: runtimeTokens } : {}),
   };
 }
@@ -95,21 +108,21 @@ export function route(intent: RoutedIntent): RouteDecision {
         ? intent.secondBest
         : null;
     return {
-      kind: 'commit',
+      kind: "commit",
       primary: intent.label,
       maybeSecondary,
     };
   }
 
   if (intent.confidence >= CLARIFY_LOWER) {
-    const humanLabel = toSnakeCase(intent.label).replace(/_/g, ' ');
+    const humanLabel = toSnakeCase(intent.label).replace(/_/g, " ");
     return {
-      kind: 'clarify',
+      kind: "clarify",
       question: `Did you want to ${humanLabel}?`,
     };
   }
 
-  return { kind: 'fallback' };
+  return { kind: "fallback" };
 }
 
 export function shouldConsiderSecondary(intent: RoutedIntent): boolean {

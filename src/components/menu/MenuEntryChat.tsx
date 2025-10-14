@@ -21,7 +21,10 @@ import { appendMessage } from "../../services/data";
 import { supabase } from "../../lib/supabase";
 import { generateAIResponse, formatAnnotationLabel } from "../../services/ai";
 import { predictIntent, isEntryChatAllowed } from "../../lib/intent";
-import type { IntentPredictionResult, ProcessingStep } from "../../types/intent";
+import type {
+  IntentPredictionResult,
+  ProcessingStep,
+} from "../../types/intent";
 import type { ProcessingStepId } from "../../types/intent";
 import { getColors, radii, spacing, typography, shadows } from "../../theme";
 import { useTheme } from "../../contexts/ThemeContext";
@@ -177,21 +180,9 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
       );
 
       if (!isEntryChatAllowed(prediction.id)) {
-        setTimeline(
-          "knowledge_search",
-          "skipped",
-          "Redirect required"
-        );
-        setTimeline(
-          "openai_request",
-          "skipped",
-          "Use main chat"
-        );
-        setTimeline(
-          "openai_response",
-          "skipped",
-          "Intent restricted"
-        );
+        setTimeline("knowledge_search", "skipped", "Redirect required");
+        setTimeline("openai_request", "skipped", "Use main chat");
+        setTimeline("openai_response", "skipped", "Intent restricted");
         onErrorUpdate(
           "This intent is managed from Main Chat. Switch surfaces to continue."
         );
@@ -303,9 +294,7 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
       setTimeline(
         "openai_response",
         "error",
-        error instanceof Error
-          ? error.message
-          : "Unable to contact AI"
+        error instanceof Error ? error.message : "Unable to contact AI"
       );
       onErrorUpdate(
         error instanceof Error
@@ -315,13 +304,7 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     } finally {
       setIsWorkingWithAI(false);
     }
-  }, [
-    annotations,
-    composerText,
-    entry,
-    onAnnotationsUpdate,
-    onErrorUpdate,
-  ]);
+  }, [annotations, composerText, entry, onAnnotationsUpdate, onErrorUpdate]);
 
   const renderAnnotationItem = useCallback(({ item }: { item: Annotation }) => {
     const isUser = item.kind === "user";
@@ -383,7 +366,9 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
           <View
             style={[
               styles.annotationBubble,
-              isUser ? styles.annotationBubbleUser : styles.annotationBubbleOther,
+              isUser
+                ? styles.annotationBubbleUser
+                : styles.annotationBubbleOther,
             ]}
           >
             <Text
@@ -629,6 +614,27 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
               </Text>
             </View>
           </Pressable>
+          {composerMode === "ai" && processingSteps.length > 0 && (
+            <View style={styles.processingRow}>
+              {processingSteps.map((step) => {
+                let color = colors.border;
+                if (step.status === "running") color = colors.accent;
+                else if (step.status === "done") color = colors.success;
+                else if (step.status === "error") color = colors.error;
+
+                return (
+                  <View
+                    key={step.id}
+                    style={[
+                      styles.processingDot,
+                      { backgroundColor: color },
+                      step.status === "skipped" && styles.processingDotSkipped,
+                    ]}
+                  />
+                );
+              })}
+            </View>
+          )}
         </View>
         <View style={styles.inputRow}>
           <TextInput
@@ -656,9 +662,7 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
                   (composerMode === "ai" && disableAISend)) &&
                   styles.noteSendButtonDisabled,
               ]}
-              onPress={
-                composerMode === "note" ? handleAddNote : handleAskAI
-              }
+              onPress={composerMode === "note" ? handleAddNote : handleAskAI}
               disabled={
                 composerMode === "note" ? disableNoteSend : disableAISend
               }
@@ -682,21 +686,6 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
               predictedIntent.confidence * 100
             )}% confidence)`}
           </Text>
-        )}
-        {composerMode === "ai" && processingSteps.length > 0 && (
-          <View style={styles.processingRow}>
-            {processingSteps.map((step) => (
-              <View
-                key={step.id}
-                style={[
-                  styles.processingChip,
-                  styles[`processing_${step.status}` as const],
-                ]}
-              >
-                <Text style={styles.processingText}>{step.label}</Text>
-              </View>
-            ))}
-          </View>
         )}
       </View>
     </KeyboardAvoidingView>
@@ -1004,39 +993,17 @@ const createStyles = (colors: any, insets: any) =>
     },
     processingRow: {
       flexDirection: "row",
-      flexWrap: "wrap",
       gap: spacing.xs,
-      marginTop: spacing.xs,
+      alignItems: "center",
+      marginLeft: spacing.sm,
     },
-    processingChip: {
-      paddingHorizontal: spacing.sm,
-      paddingVertical: spacing.xs,
-      borderRadius: radii.pill,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.surface,
+    processingDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
     },
-    processing_pending: {
-      borderColor: colors.border,
-    },
-    processing_running: {
-      borderColor: colors.accent,
-    },
-    processing_done: {
-      borderColor: colors.success,
-    },
-    processing_error: {
-      borderColor: colors.error,
-    },
-    processing_skipped: {
-      borderColor: colors.border,
-      opacity: 0.6,
-    },
-    processingText: {
-      ...typography.caption,
-      fontSize: 10,
-      color: colors.textPrimary,
-      textTransform: "uppercase",
+    processingDotSkipped: {
+      opacity: 0.3,
     },
   });
 

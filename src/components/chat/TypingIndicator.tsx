@@ -1,6 +1,6 @@
 import React from "react";
 import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
-import { colors, spacing, radii, typography, shadows } from "../theme";
+import { colors, spacing, radii, typography, shadows } from "../../theme";
 
 interface TypingIndicatorProps {
   isVisible: boolean;

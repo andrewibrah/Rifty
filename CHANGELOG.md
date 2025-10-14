@@ -1,25 +1,162 @@
-# Major UI Improvements & Feature Updates
+# Changelog
 
-## Overview
-This branch contains significant improvements to the Rifty app's user interface, authentication system, and core functionality. The changes focus on better user experience, cleaner code organization, and enhanced feature differentiation.
+All notable changes to the Rifty app will be documented in this file.
 
-## 🚀 Major Features Added
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-### 1. **Separated Note & AI Chat System**
+---
+
+## [Unreleased] - 2025-01-14
+
+### Fixed
+
+#### UI/Layout Issues
+
+- **Sidebar Menu Header**: Fixed header positioning and height issues in Goals/Journals/Schedules sidebar
+  - Removed excessive `minHeight` constraint causing header to be too tall
+  - Changed from fixed `paddingTop` to natural vertical padding for proper positioning
+  - Removed visible border/background from back button for cleaner appearance
+- **Main Chat History Modal**: Completely redesigned for better usability
+  - Fixed header appearing at bottom instead of top
+  - Now properly displays conversations in full-screen modal view
+  - Added two-screen navigation: list view → conversation detail view
+  - Conversations now render as proper chat bubbles (bot messages left-aligned, user messages right-aligned)
+  - Bot messages show "RIFLETT" label, user messages have no label (cleaner UX)
+  - Fixed chevron arrow overlapping message counter in conversation list
+  - Restored AsyncStorage integration (was incorrectly trying to use non-existent Supabase table)
+
+- **Message Bubble Processing Indicators**: Multiple iterations to find optimal design
+  - Initially used border colors to indicate processing steps
+  - Switched to circular dot indicators below message bubbles
+  - Final implementation: Border-based indicators mapping to specific processing steps
+    - Left border: Knowledge search (step 1)
+    - Top border: OpenAI request (step 2)
+    - Right border: OpenAI response (step 3)
+    - Skips ML detection (step 0) as it's automatic
+  - Colors: Running (accent), Done (success), Error (error), Pending (border)
+
+- **Message Input Focus Issues**: Fixed critical bug causing app crashes and focus loss
+  - Completely refactored `MessageInput` component
+  - Removed complex focus/selection logic that was causing keyboard shortcuts to trigger reloads
+  - Added proper focus restoration after sending messages using `requestAnimationFrame`
+  - Simplified component to match working pattern from `MenuEntryChat`
+  - Fixed placeholder text being cut off with proper padding adjustments
+
+- **Background Logo**: Fixed appearance in light vs dark themes
+  - Dynamically sets `tintColor` to `colors.textTertiary`
+  - Light theme: 0.3 opacity, Dark theme: 0.1 opacity
+  - Removed fixed opacity from container
+
+- **Settings Modal**: Fixed modal not covering entire screen
+  - Changed `overlay` background to `colors.background` for full coverage
+  - Removed `paddingHorizontal` that was allowing chat to peek through
+
+#### Processing Steps
+
+- Fixed processing steps not fully animating (was jumping to step 2)
+  - Identified that `knowledge_search` step is marked "done" immediately (correct synchronous behavior)
+  - Updated border color logic to properly map the 3 visible steps (excluding automatic ML detection)
+
+#### Entry Chat Processing Indicators
+
+- Made AI chat processing dots more visually appealing in individual entries
+  - Replaced chip-style indicators with circular dots
+  - Moved dots inline with "Notes" and "AI" mode switcher buttons
+  - Increased dot size to 8px for better visibility
+  - Added proper spacing with `marginLeft`
+
+### Changed
+
+#### Component Organization
+
+- **Complete component folder restructure** for better maintainability:
+  - Created `src/components/chat/` folder:
+    - Moved `ChatHeader.tsx`
+    - Moved `MessageBubble.tsx`
+    - Moved `MessageInput.tsx`
+    - Moved `TypingIndicator.tsx`
+  - Created `src/components/modals/` folder:
+    - Moved `MenuModal.tsx`
+    - Moved `SettingsModal.tsx`
+    - Moved `ChatHistoryModal.tsx` (extracted from inline implementation)
+    - Moved `IntentReviewModal.tsx`
+    - Moved `ScheduleCalendarModal.tsx`
+  - Kept `src/components/menu/` for menu-specific components:
+    - `MenuList.tsx`
+    - `MenuEntryChat.tsx`
+  - Updated all import paths across the codebase to reflect new structure
+  - All components properly grouped by function (chat, modals, menu, auth)
+
+#### Intent Routing
+
+- Restored original intent routing thresholds for production use:
+  - `ROUTE_AT_THRESHOLD`: 0.01 → 0.75 (requires 75% confidence)
+  - `CLARIFY_LOWER_THRESHOLD`: 0.005 → 0.45 (minimum 45% for clarification)
+  - More strict routing ensures higher quality intent predictions
+
+#### History Modal Extraction
+
+- Extracted inline history modal implementation to standalone component
+  - Created `ChatHistoryModal.tsx` as reusable modal component
+  - Removed 100+ lines of inline code from `MenuModal.tsx`
+  - Properly uses AsyncStorage for local history storage
+  - Clean separation of concerns
+
+### Technical Improvements
+
+- **Disabled SQLite**: Forced AsyncStorage usage for better compatibility
+  - Commented out SQLite import and initialization in `src/agent/memory.ts`
+  - Prevents "database is locked" and "table not found" errors
+- **Build Stability**: Addressed various build and runtime issues
+  - Fixed Metro bundler conflicts
+  - Resolved port conflicts (8081, 8082)
+  - Addressed Xcode DerivedData and disk space issues
+- **Error Handling**: Added try-catch blocks for better error recovery
+  - Added error handling in `handleSend` (App.tsx)
+  - Improved error messages for history loading failures
+
+### UI/UX Enhancements
+
+- **Theme Switching**: Fixed text disappearing after theme switch in menu categories
+  - Added `colors` and `styles` to `useMemo` dependency array in `MenuCategories`
+- **Chat History Interface**: Modern messaging app experience
+  - Proper chat bubble layout with shadows and rounded corners
+  - Maximum 80% width for bubbles (prevents awkward full-width messages)
+  - Clear visual distinction between bot and user messages
+  - Back button navigation between list and conversation views
+  - Smooth fade transitions
+
+---
+
+## Previous Changes
+
+### Major UI Improvements & Feature Updates
+
+#### Overview
+
+Previous branch contained significant improvements to the Rifty app's user interface, authentication system, and core functionality.
+
+#### Major Features Added
+
+##### 1. Separated Note & AI Chat System
+
 - **Before**: Notes and AI responses were mixed in the same conversation
 - **After**: Clear separation between "Notes" and "AI Chat" modes
-- **Benefits**: 
+- **Benefits**:
   - Users can now distinguish between personal notes and AI interactions
   - AI questions/responses no longer count towards note counter
   - Cleaner, more organized conversation history
 
-### 2. **Enhanced Entry Management**
+##### 2. Enhanced Entry Management
+
 - **Delete Individual Notes**: Long-press on any note to delete it with confirmation
 - **Delete All Entries**: Added "Delete All" button in footer for each entry type (Goals, Journals, Schedules)
 - **Visual Improvements**: Notes now display as elegant entries instead of chat bubbles
 - **Date Positioning**: Moved dates to left side for better readability
 
-### 3. **Completely Redesigned Authentication System**
+##### 3. Completely Redesigned Authentication System
+
 - **Modern Welcome Screen**: Clean interface with logo and multiple auth options
 - **Multiple Auth Methods**:
   - Sign up with email
@@ -29,148 +166,19 @@ This branch contains significant improvements to the Rifty app's user interface,
 - **Improved Email Auth**: Dedicated email/password form with proper validation
 - **Better UX**: Logo disappears during typing, smooth transitions
 
-### 4. **Advanced Menu System**
-- **Swipe Gesture**: Swipe right to open menu with smooth "gelly-like" animation
-- **Entry Counters**: Real-time counters showing number of entries for each type
-- **Removed Menu Title**: Cleaner header without redundant "Menu" text
-- **Fixed Footer**: Delete all button positioned in bottom-right corner
+##### 4. Settings Redesign
 
-### 5. **Enhanced Chat Functionality**
-- **Clear AI Chat**: Added clear button for AI conversations with permanent deletion warning
-- **Visual Chat Headers**: Dynamic headers showing "Notes" or "AI Chat" based on current mode
-- **Improved Scrolling**: Fixed scrolling issues in entry chat containers
-- **Keyboard Avoidance**: Better keyboard handling for input fields
+- **Account Section**: Clean card design showing user email
+- **Theme Selection**: Toggle between light/dark/system themes
+- **Log Out Button**: Prominent, easy-to-find logout option
+- **Visual Polish**: Better spacing, icons, and typography
 
-## 🛠 Technical Improvements
+##### 5. Menu Organization
 
-### 1. **Code Organization & Architecture**
-- **Component Refactoring**: Split large components into smaller, focused ones
-- **New Hook System**: 
-  - `useMenuState.ts`: Manages menu state and entry counts
-  - `useEntryChat.ts`: Handles entry chat functionality
-- **Auth Componentization**: Separated Auth into `WelcomeAuth` and `EmailAuth` components
-- **Better File Structure**: Organized components into logical folders
-
-### 2. **State Management**
-- **Reactive Entry Counts**: Counters update automatically when entries are added/deleted
-- **Server-Driven Updates**: Removed local state manipulation, relying on Supabase for data consistency
-- **Proper State Reset**: Clean state management when navigating between screens
-
-### 3. **UI/UX Enhancements**
-- **Smooth Animations**: Added fluid transitions and animations throughout the app
-- **Better Typography**: Improved text hierarchy and readability
-- **Consistent Spacing**: Standardized spacing and layout across components
-- **Theme Integration**: Better light/dark mode support
-
-### 4. **Performance Optimizations**
-- **Native Driver**: Used native driver for animations for better performance
-- **Efficient Rendering**: Optimized component re-renders
-- **Better Memory Management**: Proper cleanup of event listeners and state
-
-## 🐛 Bug Fixes
-
-### 1. **Scrolling Issues**
-- Fixed non-scrollable entry chat containers
-- Resolved over-scrolling problems when typing and scrolling simultaneously
-- Improved keyboard avoidance responsiveness
-
-### 2. **State Management**
-- Fixed notes disappearing when deleting individual entries
-- Resolved entry counters not updating on deletion
-- Fixed sidebar not updating automatically after changes
-
-### 3. **Authentication**
-- Fixed invisible inputs in light mode
-- Resolved render errors with undefined typography properties
-- Improved form validation and error handling
-
-### 4. **Menu System**
-- Fixed menu not loading properly
-- Resolved gesture conflicts with main chat scrolling
-- Fixed back button causing black screen
-
-## 📱 User Experience Improvements
-
-### 1. **Intuitive Interactions**
-- **Long-press to Delete**: More natural way to delete notes
-- **Swipe Gestures**: Gesture-based menu opening
-- **Visual Feedback**: Better button states and loading indicators
-
-### 2. **Information Architecture**
-- **Clear Mode Indicators**: Users always know if they're in Notes or AI Chat mode
-- **Entry Counters**: Quick overview of content in each category
-- **Contextual Actions**: Actions appear when relevant
-
-### 3. **Accessibility**
-- **Better Touch Targets**: Larger, more accessible buttons
-- **Clear Visual Hierarchy**: Improved contrast and typography
-- **Consistent Navigation**: Predictable user flows
-
-## 🔧 Technical Details
-
-### New Components Created:
-- `src/components/auth/WelcomeAuth.tsx`
-- `src/components/auth/EmailAuth.tsx`
-- `src/components/MenuList.tsx` (consolidated menu components)
-- `src/hooks/useMenuState.ts`
-- `src/hooks/useEntryChat.ts`
-
-### Updated Components:
-- `src/components/Auth.tsx` (refactored)
-- `src/components/MenuModal.tsx`
-- `src/components/menu/MenuEntryChat.tsx`
-- `src/components/MenuList.tsx`
-- `App.tsx` (gesture handling)
-
-### New Features:
-- Swipe gesture handling with `react-native-gesture-handler`
-- OAuth integration for Google and Apple
-- Enhanced Supabase integration
-- Improved keyboard avoidance
-- Better error handling and user feedback
-
-## 🎯 Future Considerations
-
-### Potential Enhancements:
-1. **Goal vs Journal Differentiation**: Implement the feature differentiation outlined in `FEATURE_DIFFERENTIATION.md`
-2. **Advanced Analytics**: Progress tracking and insights
-3. **Export Functionality**: PDF/text export for journal entries
-4. **Voice Notes**: Audio recording for journal entries
-5. **Calendar Integration**: Sync with external calendars
-6. **Collaboration Features**: Share entries with others
-
-### Technical Debt Addressed:
-- Removed deprecated `PanGestureHandler` usage
-- Updated to modern `SafeAreaView` from `react-native-safe-area-context`
-- Cleaned up unused SQLite dependencies
-- Improved TypeScript type safety
-
-## 📋 Testing Checklist
-
-- [ ] Welcome screen displays correctly
-- [ ] Email authentication works (sign up and sign in)
-- [ ] Google/Apple OAuth integration
-- [ ] Menu opens with swipe gesture
-- [ ] Entry counters update correctly
-- [ ] Notes and AI chat separation works
-- [ ] Individual note deletion works
-- [ ] Delete all entries functionality
-- [ ] Clear AI chat works
-- [ ] Scrolling works in all containers
-- [ ] Keyboard avoidance works properly
-- [ ] Light/dark mode switching
-- [ ] All animations are smooth
-
-## 🚀 Deployment Notes
-
-1. **Dependencies**: Ensure all new dependencies are installed
-2. **Environment Variables**: Verify OAuth configuration
-3. **Database**: No schema changes required
-4. **Testing**: Test on both iOS and Android devices
-5. **Performance**: Monitor for any performance regressions
+- **Footer with Settings**: Settings button moved to bottom of menu for easy access
+- **History in Categories**: "Main History" now appears as a card in menu categories
+- **Cleaner Navigation**: Improved back button behavior and modal structure
 
 ---
 
-**Branch**: `feature/major-ui-improvements`  
-**Date**: January 2025  
-**Status**: Ready for Review
+[Unreleased]: https://github.com/yourusername/rifty/compare/main...updates/fixed-major-problems
