@@ -15,7 +15,12 @@
     "active:sync": "ts-node active_learning/syncIntentAudits.ts",
     "active:queue": "ts-node active_learning/buildLabelQueue.ts",
     "active:merge": "ts-node active_learning/mergeLabels.ts",
-    "postinstall": "patch-package || true"
+    "postinstall": "patch-package || true",
+    "mcp:install:core": "cd mcp/core && npm install",
+    "mcp:install:database": "cd mcp/database && npm install",
+    "mcp:install:agent": "cd mcp/agent && npm install",
+    "mcp:install:build": "cd mcp/build && npm install",
+    "mcp:build:core": "cd mcp/core && npm run build"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
