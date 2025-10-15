@@ -6,18 +6,23 @@ import type {
   BotMessage,
 } from "../types/chat";
 import { appendMessage, listJournals, type EntryType } from "../services/data";
-import {
-  createEntryMVP,
-  type ProcessedEntryResult,
-} from "../lib/entries";
+import { createEntryFromChat } from "../lib/entries";
 import type {
   EntryNotePayload,
   IntentMetadata,
+  IntentPredictionResult,
   ProcessingStep,
   ProcessingStepId,
 } from "../types/intent";
 import type { MemoryKind } from "@/agent/memory";
 import { answerAnalystQuery } from "../services/memory";
+import { handleMessage } from "@/chat/handleMessage";
+import { planAction } from "@/agent/planner";
+import { handleToolCall } from "@/agent/actions";
+import { generateMainChatReply } from "../services/mainChat";
+import { buildPredictionFromNative, mapIntentToEntryType } from "../lib/intent";
+import { Memory } from "@/agent/memory";
+import type { PlannerResponse } from "@/agent/types";
 
 /**
  * Detect if input is a question (analyst mode) or an entry
@@ -190,7 +195,6 @@ export const useChatState = (
   onEntryCreated?: () => void
 ): {
   messages: ChatMessage[];
-  isTyping: boolean;
   pendingAction: { entryId: string; action: string } | null;
   pendingGoal: { entryId: string; goalData: any } | null;
   groupMessages: (msgs: ChatMessage[]) => MessageGroup[];
@@ -204,7 +208,6 @@ export const useChatState = (
   ) => void;
 } => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isTyping, setIsTyping] = useState(false);
   const [pendingAction, setPendingAction] = useState<{
     entryId: string;
     action: string;
@@ -387,7 +390,6 @@ export const useChatState = (
         };
 
         setMessages((prevMessages) => [...prevMessages, userMessage]);
-        setIsTyping(true);
 
         try {
           const result = await answerAnalystQuery(trimmedContent);
@@ -415,125 +417,291 @@ export const useChatState = (
               msg.id === tempId ? { ...msg, status: "failed" as const } : msg
             )
           );
-        } finally {
-          setIsTyping(false);
         }
       } else {
-        // Entry mode: create entry with MVP flow
+        // Entry mode: orchestrate agent pipeline with response-first strategy
         const optimisticType: EntryType = "journal";
+        let processingSteps = processingTemplate();
+        const createdAt = new Date().toISOString();
+
         const userMessage: EntryMessage = {
           id: tempId,
           kind: "entry",
           type: optimisticType,
           content: trimmedContent,
-          created_at: new Date().toISOString(),
+          created_at: createdAt,
           status: "sending",
+          processing: processingSteps,
         };
 
         setMessages((prevMessages) => [...prevMessages, userMessage]);
 
+        const advanceTimeline = (
+          stepId: ProcessingStepId,
+          status: ProcessingStep["status"],
+          detail?: string
+        ) => {
+          processingSteps = updateTimeline(processingSteps, stepId, status, detail);
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === tempId && msg.kind === "entry"
+                ? { ...msg, processing: processingSteps }
+                : msg
+            )
+          );
+        };
+
+        advanceTimeline("ml_detection", "running", "Analyzing intent");
+
         try {
-          const result: ProcessedEntryResult =
-            await createEntryMVP(trimmedContent);
-          const saved = result.entry;
-          const resolvedType = (saved.type ?? "journal") as EntryType;
-          const aiIntent = saved.ai_intent ?? resolvedType;
-          const aiConfidence =
-            typeof saved.ai_confidence === "number"
-              ? saved.ai_confidence
-              : null;
-          const aiMeta = saved.ai_meta ?? null;
+          const intentPayload = await handleMessage(trimmedContent);
+          const prediction = buildPredictionFromNative(intentPayload.nativeIntent);
+          const intentMeta = buildIntentMeta(prediction);
+          const resolvedType = mapIntentToEntryType(intentMeta.id);
 
-          if (saved?.id) {
-            const entryId = saved.id;
+          advanceTimeline(
+            "ml_detection",
+            "done",
+            `${intentMeta.displayLabel} ${(intentMeta.confidence * 100).toFixed(
+              1
+            )}%`
+          );
 
-            if (onEntryCreated) {
-              onEntryCreated();
-            }
+          const matchCount = intentPayload.memoryMatches.length;
+          advanceTimeline(
+            "knowledge_search",
+            matchCount > 0 ? "done" : "skipped",
+            matchCount > 0 ? `${matchCount} memory matches` : "No matches"
+          );
 
-            if (timeoutRef.current) {
-              clearTimeout(timeoutRef.current);
-            }
-
-            setMessages((prevMessages) =>
-              prevMessages.map((msg) =>
-                msg.id === tempId
-                  ? {
-                      ...msg,
-                      id: entryId,
-                      status: "sent" as const,
-                      type: resolvedType,
-                      aiIntent,
-                      aiConfidence,
-                      aiMeta,
-                    }
-                  : msg
-              )
-            );
-
-            appendMessage(entryId, "user", trimmedContent, {
-              messageKind: "entry",
-              entryType: resolvedType,
-              aiIntent,
-              aiConfidence,
-              aiMeta,
-            }).catch((error) => {
-              console.error("Unable to record entry message", error);
+          let planner: PlannerResponse | null = null;
+          try {
+            const plannerResult = await planAction({
+              payload: intentPayload.enriched,
             });
+            planner = plannerResult.response ?? null;
+          } catch (plannerError) {
+            console.warn("[Chat] planner failed", plannerError);
+          }
 
-            setIsTyping(true);
+          advanceTimeline("openai_request", "running", "Generating response");
 
-            const reflection = result.reflection || "Saved. Keep going.";
+          const mainReply = await generateMainChatReply({
+            userText: trimmedContent,
+            intent: intentPayload,
+            planner,
+          });
 
-            // If action was suggested, store it
-            if (result.summary?.suggested_action) {
-              setPendingAction({
-                entryId,
-                action: result.summary.suggested_action,
+          advanceTimeline("openai_request", "done", "Prompt dispatched");
+          advanceTimeline("openai_response", "done", "Response captured");
+
+          let finalTimeline = processingSteps;
+          setMessages((prevMessages) =>
+            prevMessages.map((msg) =>
+              msg.id === tempId && msg.kind === "entry"
+                ? {
+                    ...msg,
+                    type: resolvedType,
+                    status: "sent" as const,
+                    aiIntent: intentMeta.id,
+                    aiConfidence: intentMeta.confidence,
+                    intentMeta,
+                    aiMeta: {
+                      ...(msg.aiMeta ?? {}),
+                      intent: intentMeta,
+                      plan: planner,
+                      processingTimeline: finalTimeline,
+                    },
+                  }
+                : msg
+            )
+          );
+
+          const botMessage: BotMessage = {
+            id: `bot-${tempId}`,
+            kind: "bot",
+            afterId: tempId,
+            content: mainReply.reply,
+            created_at: new Date().toISOString(),
+            status: "sent",
+          };
+
+          setMessages((prevMessages) => [...prevMessages, botMessage]);
+
+          const toolExecution = handleToolCall(planner, {
+            originalText: trimmedContent,
+          });
+
+          const toolPayload = toolExecution
+            ? (toolExecution.payload as Record<string, any> | undefined)
+            : undefined;
+
+          if (toolExecution?.action === "goal.create" && toolPayload) {
+            setPendingGoal({
+              entryId: tempId,
+              goalData: toolPayload,
+            });
+          }
+
+          if (
+            toolExecution?.action === "journal.create" &&
+            toolPayload &&
+            typeof toolPayload.summary === "string"
+          ) {
+            setPendingAction({
+              entryId: tempId,
+              action: toolPayload.summary,
+            });
+          }
+
+          const persist = async () => {
+            try {
+              const note = buildLocalFallbackNote(
+                intentMeta.displayLabel,
+                trimmedContent
+              );
+
+              const savedEntry = await createEntryFromChat({
+                content: trimmedContent,
+                entryType: resolvedType,
+                intent: prediction,
+                note,
+                processingTimeline: finalTimeline,
+                nativeIntent: intentPayload.nativeIntent,
+                enriched: intentPayload.enriched,
+                decision: intentPayload.decision,
+                redaction: intentPayload.redaction,
+                memoryMatches: intentPayload.memoryMatches,
+                plan: planner,
               });
-            }
 
-            // If goal was detected, store it
-            if (result.goal_detected && result.goal) {
-              setPendingGoal({
-                entryId,
-                goalData: result.goal,
+              finalTimeline = finalTimeline.map((step) =>
+                step.status === "running" ? { ...step, status: "done" } : step
+              );
+
+              setMessages((prev) =>
+                prev.map((msg) => {
+                  if (msg.id === tempId && msg.kind === "entry") {
+                    return {
+                      ...msg,
+                      id: savedEntry.id,
+                      processing: finalTimeline,
+                      aiMeta: {
+                        ...(msg.aiMeta ?? {}),
+                        intent: intentMeta,
+                        plan: planner,
+                        processingTimeline: finalTimeline,
+                        learned: mainReply.learned,
+                        ethical: mainReply.ethical,
+                      },
+                    };
+                  }
+                  if (msg.id === `bot-${tempId}` && msg.kind === "bot") {
+                    return {
+                      ...msg,
+                      id: `bot-${savedEntry.id}`,
+                      afterId: savedEntry.id,
+                    };
+                  }
+                  return msg;
+                })
+              );
+
+              setPendingGoal((prev) =>
+                prev && prev.entryId === tempId
+                  ? { entryId: savedEntry.id, goalData: prev.goalData }
+                  : prev
+              );
+              setPendingAction((prev) =>
+                prev && prev.entryId === tempId
+                  ? { entryId: savedEntry.id, action: prev.action }
+                  : prev
+              );
+
+              appendMessage(savedEntry.id, "user", trimmedContent, {
+                messageKind: "entry",
+                entryType: resolvedType,
+                aiIntent: intentMeta.id,
+                aiConfidence: intentMeta.confidence,
+                aiMeta: {
+                  intent: intentMeta,
+                  plan: planner,
+                  processingTimeline: finalTimeline,
+                  learned: mainReply.learned,
+                  ethical: mainReply.ethical,
+                },
+              }).catch((error) => {
+                console.error("Unable to record entry message", error);
               });
-            }
 
-            timeoutRef.current = setTimeout(() => {
-              setIsTyping(false);
-
-              const botMessage: BotMessage = {
-                id: `bot-${entryId}`,
-                kind: "bot",
-                afterId: entryId,
-                content: reflection,
-                created_at: new Date().toISOString(),
-                status: "sent",
-              };
-
-              setMessages((prevMessages) => [...prevMessages, botMessage]);
-
-              appendMessage(entryId, "assistant", reflection, {
+              appendMessage(savedEntry.id, "assistant", mainReply.reply, {
                 messageKind: "autoReply",
                 entryType: resolvedType,
-                afterId: entryId,
-                aiIntent,
-                aiConfidence,
-                aiMeta,
+                afterId: savedEntry.id,
+                aiIntent: intentMeta.id,
+                aiConfidence: intentMeta.confidence,
+                aiMeta: {
+                  reply: mainReply.reply,
+                  learned: mainReply.learned,
+                  ethical: mainReply.ethical,
+                  plan: planner,
+                },
               }).catch((error) => {
                 console.error("Unable to record auto-reply", error);
               });
-            }, 1500);
-          }
+
+              const memoryKind = entryTypeToMemoryKind[resolvedType];
+              try {
+                await Memory.upsert({
+                  id: savedEntry.id,
+                  kind: memoryKind,
+                  text: trimmedContent,
+                  ts: Date.now(),
+                });
+              } catch (memoryError) {
+                console.warn("[Chat] memory upsert failed", memoryError);
+              }
+
+              if (onEntryCreated) {
+                onEntryCreated();
+              }
+            } catch (persistError) {
+              console.error("[Chat] persist failed", persistError);
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === tempId && msg.kind === "entry"
+                    ? {
+                        ...msg,
+                        processing: updateTimeline(
+                          processingSteps,
+                          "openai_response",
+                          "error",
+                          persistError instanceof Error
+                            ? persistError.message
+                            : "Failed to save entry"
+                        ),
+                      }
+                    : msg
+                )
+              );
+            }
+          };
+
+          void persist();
         } catch (error) {
+          console.error("Error sending message:", error);
+          advanceTimeline(
+            "openai_response",
+            "error",
+            error instanceof Error ? error.message : "Unable to process message"
+          );
           setMessages((prevMessages) =>
             prevMessages.map((msg) =>
-              msg.id === tempId ? { ...msg, status: "failed" as const } : msg
+              msg.id === tempId && msg.kind === "entry"
+                ? { ...msg, status: "failed" as const }
+                : msg
             )
           );
-          console.error("Error sending message:", error);
         }
       }
 
@@ -544,7 +712,6 @@ export const useChatState = (
 
   return {
     messages,
-    isTyping,
     pendingAction,
     pendingGoal,
     groupMessages,

@@ -1,25 +1,25 @@
-import type { EntryType } from '../services/data';
-import type { IntentMetadata, ProcessingStep } from './intent';
+import type { EntryType } from "../services/data";
+import type { IntentMetadata, ProcessingStep } from "./intent";
 
 export interface Message {
   id: string;
   created_at: string;
   content: string;
-  status?: 'sending' | 'sent' | 'failed';
+  status?: "sending" | "sent" | "failed";
+  processing?: ProcessingStep[];
 }
 
 export interface EntryMessage extends Message {
-  kind: 'entry';
+  kind: "entry";
   type: EntryType;
   aiIntent?: string | null;
   aiConfidence?: number | null;
   aiMeta?: Record<string, any> | null;
   intentMeta?: IntentMetadata;
-  processing?: ProcessingStep[];
 }
 
 export interface BotMessage extends Message {
-  kind: 'bot';
+  kind: "bot";
   afterId: string;
 }
 
@@ -29,5 +29,5 @@ export interface MessageGroup {
   id: string;
   messages: ChatMessage[];
   timestamp: string;
-  type: 'entry' | 'bot';
+  type: "entry" | "bot";
 }

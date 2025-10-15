@@ -1,12 +1,18 @@
 import { supabase } from "./supabase";
 import type { EntryType } from "../services/data";
+import Constants from "expo-constants";
 import type {
   EntryNotePayload,
   IntentPredictionResult,
   ProcessingStep,
 } from "../types/intent";
 import type { NativeIntentResult } from "../native/intent";
-import type { EnrichedPayload, RouteDecision, RedactionResult, PlannerResponse } from "@/agent/types";
+import type {
+  EnrichedPayload,
+  RouteDecision,
+  RedactionResult,
+  PlannerResponse,
+} from "@/agent/types";
 import type { MemoryRecord } from "@/agent/memory";
 
 export interface ClassifiedEntry {
@@ -44,7 +50,31 @@ async function getSupabaseUrl(): Promise<string> {
 }
 
 async function getAnonKey(): Promise<string> {
-  return supabase.supabaseKey;
+  // Get the anon key from the same source as supabase client initialization
+  const extra = ((Constants.expoConfig?.extra as
+    | Record<string, unknown>
+    | undefined) ??
+    (Constants.manifest2 as { extra?: Record<string, unknown> } | null)
+      ?.extra ??
+    {}) as Record<string, unknown>;
+
+  const pickEnvValue = (...values: Array<unknown>): string | undefined => {
+    for (const value of values) {
+      if (typeof value === "string" && value.trim().length > 0) {
+        return value.trim();
+      }
+    }
+    return undefined;
+  };
+
+  const configuredKey = pickEnvValue(
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+    process.env.SUPABASE_ANON_KEY,
+    extra.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+    extra.SUPABASE_ANON_KEY
+  );
+
+  return configuredKey || "anon-key";
 }
 
 async function getAccessToken(): Promise<string> {
@@ -153,7 +183,9 @@ export async function createEntryFromChat(
 /**
  * Create entry using MVP enhanced flow (summarization + embeddings + goal detection)
  */
-export async function createEntryMVP(content: string): Promise<ProcessedEntryResult> {
+export async function createEntryMVP(
+  content: string
+): Promise<ProcessedEntryResult> {
   const trimmedContent = content.trim();
   if (!trimmedContent) {
     throw new Error("Content is required");
@@ -177,7 +209,7 @@ export async function createEntryMVP(content: string): Promise<ProcessedEntryRes
 
   if (!response.ok) {
     const message = await parseError(response);
-    console.error('[createEntryMVP] Request failed', {
+    console.error("[createEntryMVP] Request failed", {
       status: response.status,
       statusText: response.statusText,
       url: `${url}/functions/v1/process_entry_mvp`,

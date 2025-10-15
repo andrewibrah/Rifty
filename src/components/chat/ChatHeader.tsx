@@ -16,6 +16,7 @@ interface ChatHeaderProps {
   onHistoryPress: () => void;
   onClearPress: () => void;
   onCalendarPress: () => void;
+  onScheduleTemplatePress: () => void;
   hasContent: boolean;
 }
 
@@ -23,6 +24,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   onHistoryPress,
   onClearPress,
   onCalendarPress,
+  onScheduleTemplatePress,
   hasContent,
 }) => {
   const { themeMode } = useTheme();
@@ -52,7 +54,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
       <View style={styles.rightActions}>
         <TouchableOpacity
           onPress={onCalendarPress}
-          style={styles.iconButton}
+          style={styles.scheduleButton}
           accessibilityRole="button"
           accessibilityLabel="Open schedule calendar"
         >
@@ -61,6 +63,14 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
             size={20}
             color={colors.textSecondary}
           />
+          <TouchableOpacity
+            onPress={onScheduleTemplatePress}
+            style={styles.addButton}
+            accessibilityRole="button"
+            accessibilityLabel="Insert schedule template"
+          >
+            <Ionicons name="add-outline" size={12} color={colors.accent} />
+          </TouchableOpacity>
         </TouchableOpacity>
         <TouchableOpacity
           onPress={onClearPress}
@@ -135,6 +145,27 @@ const createStyles = (colors: any, topPadding: number) =>
     },
     iconButtonSpacing: {
       marginLeft: spacing.sm,
+    },
+    scheduleButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      minWidth: 36,
+      minHeight: 36,
+      position: "relative",
+    },
+    addButton: {
+      position: "absolute",
+      top: -2,
+      right: -2,
+      width: 16,
+      height: 16,
+      borderRadius: 8,
+      backgroundColor: colors.background,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: colors.border,
     },
   });
 

@@ -17,12 +17,17 @@ interface MessageInputProps {
   content: string;
   onContentChange: (content: string) => void;
   onSend: () => void;
+  processingSteps?: Array<{
+    id: string;
+    status: "pending" | "running" | "done" | "error";
+  }>;
 }
 
 const MessageInput: React.FC<MessageInputProps> = ({
   content,
   onContentChange,
   onSend,
+  processingSteps,
 }) => {
   const { themeMode } = useTheme();
   const insets = useSafeAreaInsets();
@@ -35,15 +40,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   const inputRef = useRef<TextInput>(null);
   const disableSend = !content.trim();
-  const scheduleTemplate = "Place | Time | Reason";
-  const showScheduleShortcuts = content.includes("|");
-
-  const handleInsertScheduleTemplate = () => {
-    onContentChange(scheduleTemplate);
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-    });
-  };
 
   const handleSendPress = () => {
     if (disableSend) return;
@@ -53,23 +49,37 @@ const MessageInput: React.FC<MessageInputProps> = ({
     });
   };
 
+  const getBubbleColor = (status: string) => {
+    switch (status) {
+      case "running":
+        return colors.accent;
+      case "done":
+        return colors.success;
+      case "error":
+        return colors.error;
+      default:
+        return colors.border;
+    }
+  };
+
   return (
     <View style={styles.wrapper}>
-      <View style={styles.scheduleRow}>
-        <TouchableOpacity
-          onPress={handleInsertScheduleTemplate}
-          style={styles.scheduleButton}
-          accessibilityRole="button"
-          accessibilityLabel="Insert schedule template"
-        >
-          <Text style={styles.scheduleButtonText}>+ Schedule</Text>
-        </TouchableOpacity>
-        {showScheduleShortcuts && (
-          <Text style={styles.scheduleHint}>
-            Fill in: Place | Time | Reason
-          </Text>
-        )}
-      </View>
+      {processingSteps && processingSteps.length > 0 && (
+        <View style={styles.processingRow}>
+          <View style={styles.bubblesContainer}>
+            {processingSteps.map((step, index) => (
+              <View
+                key={step.id}
+                style={[
+                  styles.processingBubble,
+                  { backgroundColor: getBubbleColor(step.status) },
+                ]}
+              />
+            ))}
+          </View>
+          <Text style={styles.processingLabel}>Processing...</Text>
+        </View>
+      )}
       <View style={styles.inputRow}>
         <TextInput
           ref={inputRef}
@@ -105,31 +115,28 @@ const createStyles = (colors: any, bottomInset: number) =>
       paddingBottom: Math.max(spacing.xl, bottomInset + spacing.md),
       backgroundColor: colors.background,
     },
-    scheduleRow: {
+    processingRow: {
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "space-between",
-      marginBottom: spacing.xs,
-    },
-    scheduleButton: {
+      justifyContent: "flex-start",
+      marginBottom: spacing.sm,
       paddingVertical: spacing.xs,
-      paddingHorizontal: spacing.sm,
-      borderRadius: radii.sm,
-      backgroundColor: colors.surfaceElevated,
-      borderWidth: 1,
-      borderColor: colors.border,
     },
-    scheduleButtonText: {
-      fontFamily: typography.button.fontFamily,
-      fontSize: 13,
-      color: colors.accent,
-      fontWeight: "600" as const,
+    bubblesContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      marginRight: spacing.sm,
     },
-    scheduleHint: {
-      fontFamily: typography.caption.fontFamily,
-      fontSize: 11,
-      color: colors.textTertiary,
-      fontStyle: "italic",
+    processingBubble: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+    },
+    processingLabel: {
+      ...typography.caption,
+      fontSize: 12,
+      color: colors.textSecondary,
     },
     inputRow: {
       flexDirection: "row",

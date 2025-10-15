@@ -7,6 +7,7 @@ import {
   ScrollView,
   ActivityIndicator,
   StyleSheet,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -68,6 +69,37 @@ const ChatHistoryModal: React.FC<HistoryModalProps> = ({
     }
   };
 
+  const handleDeleteAll = () => {
+    if (historyRecords.length === 0) return;
+
+    Alert.alert(
+      "Delete All History",
+      "Are you sure you want to delete all archived conversations? This action cannot be undone.",
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: "Delete All",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await AsyncStorage.removeItem(MAIN_HISTORY_STORAGE_KEY);
+              setHistoryRecords([]);
+            } catch (error) {
+              console.error("Failed to delete all history", error);
+              Alert.alert(
+                "Error",
+                "Failed to delete history. Please try again."
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const renderConversationList = () => (
     <>
       <View style={styles.header}>
@@ -75,9 +107,19 @@ const ChatHistoryModal: React.FC<HistoryModalProps> = ({
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.title}>Main History</Text>
-        <TouchableOpacity onPress={loadHistory} style={styles.refreshButton}>
-          <Ionicons name="refresh" size={20} color={colors.textSecondary} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {historyRecords.length > 0 && (
+            <TouchableOpacity
+              onPress={handleDeleteAll}
+              style={styles.deleteButton}
+            >
+              <Ionicons name="trash-outline" size={20} color={colors.error} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={loadHistory} style={styles.refreshButton}>
+            <Ionicons name="refresh" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {historyLoading ? (
@@ -241,11 +283,22 @@ const createStyles = (colors: any) =>
       fontSize: 20,
       color: colors.textPrimary,
     },
+    headerActions: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
     refreshButton: {
       width: 44,
       height: 44,
       justifyContent: "center",
       alignItems: "center",
+    },
+    deleteButton: {
+      width: 44,
+      height: 44,
+      justifyContent: "center",
+      alignItems: "center",
+      marginRight: spacing.xs,
     },
     loadingContainer: {
       flex: 1,
