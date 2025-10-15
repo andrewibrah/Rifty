@@ -19,51 +19,8 @@ const MessageBubble = memo(
     const isBot = message.kind === "bot";
     const hasStatus = message.status && message.status !== "sent";
 
-    // Get border colors based on processing steps
-    const getBorderColors = () => {
-      if (message.kind !== "entry" || !message.processing?.length) {
-        return null;
-      }
-
-      const getColorForStatus = (status: string) => {
-        switch (status) {
-          case "running":
-            return colors.accent;
-          case "done":
-            return colors.success;
-          case "error":
-            return colors.error;
-          default:
-            return colors.border;
-        }
-      };
-
-      // Skip step 0 (ml_detection - automatic), show steps 1-3 on left, top, right
-      const steps = message.processing;
-      return {
-        borderLeftColor: steps[1]
-          ? getColorForStatus(steps[1].status)
-          : colors.border,
-        borderTopColor: steps[2]
-          ? getColorForStatus(steps[2].status)
-          : colors.border,
-        borderRightColor: steps[3]
-          ? getColorForStatus(steps[3].status)
-          : colors.border,
-        borderBottomColor: colors.border,
-        borderLeftWidth: 3,
-        borderTopWidth: 3,
-        borderRightWidth: 3,
-        borderBottomWidth: 1,
-      };
-    };
-
-    const borderColors = getBorderColors();
-
     const getStatusIcon = () => {
       switch (message.status) {
-        case "sending":
-          return "⏳";
         case "failed":
           return "⚠️";
         default:
@@ -73,8 +30,6 @@ const MessageBubble = memo(
 
     const getStatusColor = () => {
       switch (message.status) {
-        case "sending":
-          return colors.warning;
         case "failed":
           return colors.error;
         default:
@@ -103,7 +58,6 @@ const MessageBubble = memo(
                   styles.bubble,
                   isBot ? styles.botBubble : styles.userBubble,
                   hasStatus && styles.bubbleWithStatus,
-                  borderColors,
                 ]}
               >
                 {hasStatus && (

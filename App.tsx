@@ -32,13 +32,13 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import type { Session } from "@supabase/supabase-js";
 import ChatHeader from "./src/components/chat/ChatHeader";
 import MessageBubble from "./src/components/chat/MessageBubble";
-import TypingIndicator from "./src/components/chat/TypingIndicator";
 import MessageInput from "./src/components/chat/MessageInput";
 import MenuModal from "./src/components/modals/MenuModal";
 import SettingsScreen from "./src/screens/SettingsScreen";
 import ScheduleCalendarModal from "./src/components/modals/ScheduleCalendarModal";
 import OnboardingFlow from "./src/screens/onboarding/OnboardingFlow";
 import PersonalizationModal from "./src/components/PersonalizationModal";
+import PersonalizationSettingsScreen from "./src/screens/settings/PersonalizationSettingsScreen";
 import Auth from "./src/components/Auth";
 import IntentReviewModal from "./src/components/modals/IntentReviewModal";
 import {
@@ -104,7 +104,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
   const {
     messages,
-    isTyping,
     groupMessages,
     sendMessage,
     retryMessage,
@@ -439,6 +438,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     setShowCalendar(false);
   }, []);
 
+  const handleScheduleTemplatePress = useCallback(() => {
+    const scheduleTemplate = "Place | Time | Reason";
+    setContent(scheduleTemplate);
+  }, []);
+
   const handleSettingsPress = useCallback(() => {
     setCurrentScreen("settings");
   }, []);
@@ -507,6 +511,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
               onHistoryPress={handleMenuButtonPress}
               onClearPress={handleClearChat}
               onCalendarPress={handleCalendarButtonPress}
+              onScheduleTemplatePress={handleScheduleTemplatePress}
               hasContent={messages.length > 0}
             />
 
@@ -550,12 +555,16 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
               />
             </View>
 
-            <TypingIndicator isVisible={isTyping} />
-
             <MessageInput
               content={content}
               onContentChange={setContent}
               onSend={handleSend}
+              processingSteps={messages
+                .filter(
+                  (msg) => msg.kind === "entry" && msg.status === "sending"
+                )
+                .map((msg) => msg.processing || [])
+                .flat()}
             />
           </KeyboardAvoidingView>
         </SafeAreaView>
@@ -587,10 +596,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         bundle={personalization}
         onClose={handlePersonalizationClose}
         onSave={async (state, timezone) => {
-          const persona = await onSavePersonalization(state, timezone)
-          await onRefreshPersonalization()
-          Alert.alert('Saved', `Persona updated to ${persona}.`)
-          return persona
+          const persona = await onSavePersonalization(state, timezone);
+          await onRefreshPersonalization();
+          Alert.alert("Saved", `Persona updated to ${persona}.`);
+          return persona;
         }}
       />
 
