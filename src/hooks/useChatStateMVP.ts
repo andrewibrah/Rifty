@@ -29,7 +29,7 @@ function isAnalystQuery(content: string): boolean {
   return questionPatterns.some((pattern) => pattern.test(trimmed));
 }
 
-export const useChatState = (onEntryCreated?: () => void) => {
+export const useChatStateMVP = (onEntryCreated?: () => void) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [pendingAction, setPendingAction] = useState<{

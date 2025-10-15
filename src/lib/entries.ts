@@ -62,6 +62,15 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
+export interface ProcessedEntryResult {
+  entry: ClassifiedEntry;
+  summary: any | null;
+  embedding_stored: boolean;
+  goal_detected: boolean;
+  goal: any | null;
+  reflection: string;
+}
+
 export async function createEntryFromChat(content: string): Promise<ClassifiedEntry> {
   const trimmedContent = content.trim();
   if (!trimmedContent) {
@@ -90,5 +99,39 @@ export async function createEntryFromChat(content: string): Promise<ClassifiedEn
   }
 
   const data = (await response.json()) as ClassifiedEntry;
+  return data;
+}
+
+/**
+ * Create entry using MVP enhanced flow (summarization + embeddings + goal detection)
+ */
+export async function createEntryMVP(content: string): Promise<ProcessedEntryResult> {
+  const trimmedContent = content.trim();
+  if (!trimmedContent) {
+    throw new Error("Content is required");
+  }
+
+  const [url, anonKey, accessToken] = await Promise.all([
+    Promise.resolve(getSupabaseUrl()),
+    Promise.resolve(getAnonKey()),
+    getAccessToken(),
+  ]);
+
+  const response = await fetch(`${url}/functions/v1/process_entry_mvp`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      apikey: anonKey,
+    },
+    body: JSON.stringify({ content: trimmedContent }),
+  });
+
+  if (!response.ok) {
+    const message = await parseError(response);
+    throw new Error(message);
+  }
+
+  const data = (await response.json()) as ProcessedEntryResult;
   return data;
 }

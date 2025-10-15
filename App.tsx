@@ -25,7 +25,7 @@ import MessageInput from "./src/components/MessageInput";
 import MenuModal from "./src/components/MenuModal";
 import ScheduleCalendarModal from "./src/components/ScheduleCalendarModal";
 import OnboardingFlow from "./src/screens/onboarding/OnboardingFlow";
-import PersonalizationSettingsScreen from "./src/screens/settings/PersonalizationSettingsScreen";
+import PersonalizationModal from "./src/components/PersonalizationModal";
 import Auth from "./src/components/Auth";
 import { useChatState } from "./src/hooks/useChatState";
 import { useMenuState } from "./src/hooks/useMenuState";
@@ -376,18 +376,17 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         onClose={handleCalendarClose}
       />
 
-      {showPersonalization && personalization && (
-        <PersonalizationSettingsScreen
-          bundle={personalization}
-          onClose={handlePersonalizationClose}
-          onSave={async (state, timezone) => {
-            const persona = await onSavePersonalization(state, timezone)
-            await onRefreshPersonalization()
-            Alert.alert('Saved', `Persona updated to ${persona}.`)
-            return persona
-          }}
-        />
-      )}
+      <PersonalizationModal
+        visible={showPersonalization}
+        bundle={personalization}
+        onClose={handlePersonalizationClose}
+        onSave={async (state, timezone) => {
+          const persona = await onSavePersonalization(state, timezone)
+          await onRefreshPersonalization()
+          Alert.alert('Saved', `Persona updated to ${persona}.`)
+          return persona
+        }}
+      />
 
       {isSplashVisible && (
         <Animated.View
