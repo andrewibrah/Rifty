@@ -38,7 +38,7 @@ import MenuModal from "./src/components/modals/MenuModal";
 import SettingsScreen from "./src/screens/SettingsScreen";
 import ScheduleCalendarModal from "./src/components/modals/ScheduleCalendarModal";
 import OnboardingFlow from "./src/screens/onboarding/OnboardingFlow";
-import PersonalizationSettingsScreen from "./src/screens/settings/PersonalizationSettingsScreen";
+import PersonalizationModal from "./src/components/PersonalizationModal";
 import Auth from "./src/components/Auth";
 import IntentReviewModal from "./src/components/modals/IntentReviewModal";
 import {
@@ -124,6 +124,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   >([]);
   const [activeIntentReview, setActiveIntentReview] =
     useState<IntentReviewTicket | null>(null);
+  const [showPersonalization, setShowPersonalization] = useState(false);
 
   const splashOpacity = useRef(new Animated.Value(1)).current;
   const flameTranslate = useRef(new Animated.Value(0)).current;
@@ -458,6 +459,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     setCurrentScreen("settings");
   }, []);
 
+  const handlePersonalizationClose = useCallback(() => {
+    setShowPersonalization(false);
+  }, []);
+
   if (currentScreen === "settings") {
     return (
       <SettingsScreen
@@ -575,6 +580,18 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         review={activeIntentReview}
         onClose={handleIntentModalClose}
         onConfirm={handleIntentConfirm}
+      />
+
+      <PersonalizationModal
+        visible={showPersonalization}
+        bundle={personalization}
+        onClose={handlePersonalizationClose}
+        onSave={async (state, timezone) => {
+          const persona = await onSavePersonalization(state, timezone)
+          await onRefreshPersonalization()
+          Alert.alert('Saved', `Persona updated to ${persona}.`)
+          return persona
+        }}
       />
 
       {isSplashVisible && (

@@ -13,6 +13,8 @@ import {
 import {
   createEntryFromChat,
   type CreateEntryFromChatArgs,
+  createEntryMVP,
+  type ProcessedEntryResult,
 } from "../lib/entries";
 import { buildPredictionFromNative } from "../lib/intent";
 import { composeEntryNote } from "../services/ai";
@@ -33,12 +35,23 @@ import { Telemetry } from "@/agent/telemetry";
 import { Outbox } from "@/agent/outbox";
 import { handleToolCall } from "@/agent/actions";
 import type { ToolExecutionResult } from "@/agent/actions";
+import { answerAnalystQuery } from "../services/memory";
 
-const successMessages: Record<EntryType, string> = {
-  goal: "Saved. Keep up your hard work.",
-  journal: "Saved. The more you log, the more data you have of yourself.",
-  schedule: "Saved. Your time is your power, use it wisely.",
-};
+/**
+ * Detect if input is a question (analyst mode) or an entry
+ */
+function isAnalystQuery(content: string): boolean {
+  const trimmed = content.trim().toLowerCase();
+
+  // Question patterns
+  const questionPatterns = [
+    /^(what|when|where|who|why|how|which|can|could|should|would|will|is|are|am|do|does|did)\b/i,
+    /\?$/,
+    /^(show|tell|find|analyze|review|summarize|explain)\b/i,
+  ];
+
+  return questionPatterns.some((pattern) => pattern.test(trimmed));
+}
 
 const buildLocalFallbackNote = (
   label: string,
@@ -202,6 +215,14 @@ export const useChatState = (
 } => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{
+    entryId: string;
+    action: string;
+  } | null>(null);
+  const [pendingGoal, setPendingGoal] = useState<{
+    entryId: string;
+    goalData: any;
+  } | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadMessages = useCallback(async () => {
@@ -249,13 +270,19 @@ export const useChatState = (
           }
           chatMessages.push(entryMessage);
 
+          // Add bot response if exists
+          // (We'll reconstruct from metadata later)
           const botMessage: BotMessage = {
             id: `bot-${entry.id}`,
             kind: "bot",
             afterId: entry.id,
+<<<<<<< HEAD
             content:
               (baseMeta?.note?.guidance as string | undefined) ??
               successMessages[entry.type],
+=======
+            content: "Saved.",
+>>>>>>> riflett_mvpv1
             created_at: createdAt,
             status: "sent",
           };
@@ -311,6 +338,7 @@ export const useChatState = (
     return groups;
   }, []);
 
+<<<<<<< HEAD
   const patchEntryMessage = useCallback(
     (id: string, patch: (message: EntryMessage) => EntryMessage) => {
       setMessages((prev) =>
@@ -616,10 +644,53 @@ export const useChatState = (
             kind: "bot",
             afterId: saved.id,
             content: acknowledgement,
+=======
+  const sendMessage = useCallback(
+    async (content: string) => {
+      const trimmedContent = content.trim();
+      if (!trimmedContent) return;
+
+      const tempId = Date.now().toString();
+
+      // Determine if this is an analyst query or an entry
+      const isQuery = isAnalystQuery(trimmedContent);
+
+      if (isQuery) {
+        // Analyst mode: answer the question
+        const userMessage: BotMessage = {
+          id: tempId,
+          kind: "bot",
+          afterId: tempId,
+          content: trimmedContent,
+          created_at: new Date().toISOString(),
+          status: "sending",
+        };
+
+        setMessages((prevMessages) => [...prevMessages, userMessage]);
+        setIsTyping(true);
+
+        try {
+          const result = await answerAnalystQuery(trimmedContent);
+
+          setMessages((prevMessages) =>
+            prevMessages.map((msg) =>
+              msg.id === tempId
+                ? { ...msg, status: "sent" as const }
+                : msg
+            )
+          );
+
+          const botMessage: BotMessage = {
+            id: `bot-${tempId}`,
+            kind: "bot",
+            afterId: tempId,
+            content: result.answer,
+>>>>>>> riflett_mvpv1
             created_at: new Date().toISOString(),
             status: "sent",
           };
 
+<<<<<<< HEAD
           setMessages((prevState) => [...prevState, botMessage]);
 
           appendMessage(saved.id, "assistant", acknowledgement, {
@@ -655,6 +726,138 @@ export const useChatState = (
       }
     },
     [messages, onEntryCreated, patchEntryMessage]
+=======
+          setMessages((prevMessages) => [...prevMessages, botMessage]);
+        } catch (error) {
+          console.error("Error answering query:", error);
+          setMessages((prevMessages) =>
+            prevMessages.map((msg) =>
+              msg.id === tempId
+                ? { ...msg, status: "failed" as const }
+                : msg
+            )
+          );
+        } finally {
+          setIsTyping(false);
+        }
+      } else {
+        // Entry mode: create entry with MVP flow
+        const optimisticType: EntryType = "journal";
+        const userMessage: EntryMessage = {
+          id: tempId,
+          kind: "entry",
+          type: optimisticType,
+          content: trimmedContent,
+          created_at: new Date().toISOString(),
+          status: "sending",
+        };
+
+        setMessages((prevMessages) => [...prevMessages, userMessage]);
+
+        try {
+          const result: ProcessedEntryResult = await createEntryMVP(trimmedContent);
+          const saved = result.entry;
+          const resolvedType = (saved.type ?? "journal") as EntryType;
+          const aiIntent = saved.ai_intent ?? resolvedType;
+          const aiConfidence =
+            typeof saved.ai_confidence === "number" ? saved.ai_confidence : null;
+          const aiMeta = saved.ai_meta ?? null;
+
+          if (saved?.id) {
+            const entryId = saved.id;
+
+            if (onEntryCreated) {
+              onEntryCreated();
+            }
+
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+            }
+
+            setMessages((prevMessages) =>
+              prevMessages.map((msg) =>
+                msg.id === tempId
+                  ? {
+                      ...msg,
+                      id: entryId,
+                      status: "sent" as const,
+                      type: resolvedType,
+                      aiIntent,
+                      aiConfidence,
+                      aiMeta,
+                    }
+                  : msg
+              )
+            );
+
+            appendMessage(entryId, "user", trimmedContent, {
+              messageKind: "entry",
+              entryType: resolvedType,
+              aiIntent,
+              aiConfidence,
+              aiMeta,
+            }).catch((error) => {
+              console.error("Unable to record entry message", error);
+            });
+
+            setIsTyping(true);
+
+            const reflection = result.reflection || "Saved. Keep going.";
+
+            // If action was suggested, store it
+            if (result.summary?.suggested_action) {
+              setPendingAction({
+                entryId,
+                action: result.summary.suggested_action,
+              });
+            }
+
+            // If goal was detected, store it
+            if (result.goal_detected && result.goal) {
+              setPendingGoal({
+                entryId,
+                goalData: result.goal,
+              });
+            }
+
+            timeoutRef.current = setTimeout(() => {
+              setIsTyping(false);
+
+              const botMessage: BotMessage = {
+                id: `bot-${entryId}`,
+                kind: "bot",
+                afterId: entryId,
+                content: reflection,
+                created_at: new Date().toISOString(),
+                status: "sent",
+              };
+
+              setMessages((prevMessages) => [...prevMessages, botMessage]);
+
+              appendMessage(entryId, "assistant", reflection, {
+                messageKind: "autoReply",
+                entryType: resolvedType,
+                afterId: entryId,
+                aiIntent,
+                aiConfidence,
+                aiMeta,
+              }).catch((error) => {
+                console.error("Unable to record auto-reply", error);
+              });
+            }, 1500);
+          }
+        } catch (error) {
+          setMessages((prevMessages) =>
+            prevMessages.map((msg) =>
+              msg.id === tempId ? { ...msg, status: "failed" as const } : msg
+            )
+          );
+          console.error("Error sending message:", error);
+        }
+      }
+    },
+    [onEntryCreated]
+>>>>>>> riflett_mvpv1
   );
 
   const retryMessage = useCallback(
@@ -675,6 +878,7 @@ export const useChatState = (
     setMessages([]);
   }, []);
 
+<<<<<<< HEAD
   const updateMessageIntent = useCallback(
     (messageId: string, intentMeta: IntentMetadata, nextType?: EntryType) => {
       patchEntryMessage(messageId, (msg) => ({
@@ -691,14 +895,30 @@ export const useChatState = (
     },
     [patchEntryMessage]
   );
+=======
+  const dismissAction = useCallback(() => {
+    setPendingAction(null);
+  }, []);
+
+  const dismissGoal = useCallback(() => {
+    setPendingGoal(null);
+  }, []);
+>>>>>>> riflett_mvpv1
 
   return {
     messages,
     isTyping,
+    pendingAction,
+    pendingGoal,
     groupMessages,
     sendMessage,
     retryMessage,
     clearMessages,
+<<<<<<< HEAD
     updateMessageIntent,
+=======
+    dismissAction,
+    dismissGoal,
+>>>>>>> riflett_mvpv1
   };
 };
