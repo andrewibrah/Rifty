@@ -129,7 +129,13 @@ export async function createEntryMVP(content: string): Promise<ProcessedEntryRes
 
   if (!response.ok) {
     const message = await parseError(response);
-    throw new Error(message);
+    console.error('[createEntryMVP] Request failed', {
+      status: response.status,
+      statusText: response.statusText,
+      url: `${url}/functions/v1/process_entry_mvp`,
+      message,
+    });
+    throw new Error(`Entry creation failed: ${message} (${response.status})`);
   }
 
   const data = (await response.json()) as ProcessedEntryResult;

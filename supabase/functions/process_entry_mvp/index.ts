@@ -293,7 +293,7 @@ Deno.serve(async (req) => {
       await supabaseClient.from("entry_embeddings").insert({
         entry_id: entryId,
         user_id: userId,
-        embedding: JSON.stringify(embedding),
+        embedding: embedding,
         model: "text-embedding-3-small",
       });
       embeddingStored = true;
