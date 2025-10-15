@@ -7,30 +7,16 @@ import type {
 } from "../types/chat";
 import { appendMessage, listJournals, type EntryType } from "../services/data";
 import {
-  createEntryFromChat,
-  type CreateEntryFromChatArgs,
   createEntryMVP,
   type ProcessedEntryResult,
 } from "../lib/entries";
-import { buildPredictionFromNative } from "../lib/intent";
-import { composeEntryNote } from "../services/ai";
 import type {
   EntryNotePayload,
   IntentMetadata,
-  IntentPredictionResult,
   ProcessingStep,
   ProcessingStepId,
 } from "../types/intent";
-import { handleMessage } from "@/chat/handleMessage";
-import type { IntentPayload } from "@/chat/handleMessage";
-import { Memory } from "@/agent/memory";
 import type { MemoryKind } from "@/agent/memory";
-import { planAction } from "@/agent/planner";
-import type { PlannerResponse } from "@/agent/types";
-import { Telemetry } from "@/agent/telemetry";
-import { Outbox } from "@/agent/outbox";
-import { handleToolCall } from "@/agent/actions";
-import type { ToolExecutionResult } from "@/agent/actions";
 import { answerAnalystQuery } from "../services/memory";
 
 /**
@@ -381,10 +367,179 @@ export const useChatState = (
 
   const sendMessage = useCallback(
     async (content: string): Promise<IntentReviewTicket | null> => {
-      // Placeholder implementation
+      const trimmedContent = content.trim();
+      if (!trimmedContent) return null;
+
+      const tempId = Date.now().toString();
+
+      // Determine if this is an analyst query or an entry
+      const isQuery = isAnalystQuery(trimmedContent);
+
+      if (isQuery) {
+        // Analyst mode: answer the question
+        const userMessage: BotMessage = {
+          id: tempId,
+          kind: "bot",
+          afterId: tempId,
+          content: trimmedContent,
+          created_at: new Date().toISOString(),
+          status: "sending",
+        };
+
+        setMessages((prevMessages) => [...prevMessages, userMessage]);
+        setIsTyping(true);
+
+        try {
+          const result = await answerAnalystQuery(trimmedContent);
+
+          setMessages((prevMessages) =>
+            prevMessages.map((msg) =>
+              msg.id === tempId ? { ...msg, status: "sent" as const } : msg
+            )
+          );
+
+          const botMessage: BotMessage = {
+            id: `bot-${tempId}`,
+            kind: "bot",
+            afterId: tempId,
+            content: result.answer,
+            created_at: new Date().toISOString(),
+            status: "sent",
+          };
+
+          setMessages((prevMessages) => [...prevMessages, botMessage]);
+        } catch (error) {
+          console.error("Error answering query:", error);
+          setMessages((prevMessages) =>
+            prevMessages.map((msg) =>
+              msg.id === tempId ? { ...msg, status: "failed" as const } : msg
+            )
+          );
+        } finally {
+          setIsTyping(false);
+        }
+      } else {
+        // Entry mode: create entry with MVP flow
+        const optimisticType: EntryType = "journal";
+        const userMessage: EntryMessage = {
+          id: tempId,
+          kind: "entry",
+          type: optimisticType,
+          content: trimmedContent,
+          created_at: new Date().toISOString(),
+          status: "sending",
+        };
+
+        setMessages((prevMessages) => [...prevMessages, userMessage]);
+
+        try {
+          const result: ProcessedEntryResult =
+            await createEntryMVP(trimmedContent);
+          const saved = result.entry;
+          const resolvedType = (saved.type ?? "journal") as EntryType;
+          const aiIntent = saved.ai_intent ?? resolvedType;
+          const aiConfidence =
+            typeof saved.ai_confidence === "number"
+              ? saved.ai_confidence
+              : null;
+          const aiMeta = saved.ai_meta ?? null;
+
+          if (saved?.id) {
+            const entryId = saved.id;
+
+            if (onEntryCreated) {
+              onEntryCreated();
+            }
+
+            if (timeoutRef.current) {
+              clearTimeout(timeoutRef.current);
+            }
+
+            setMessages((prevMessages) =>
+              prevMessages.map((msg) =>
+                msg.id === tempId
+                  ? {
+                      ...msg,
+                      id: entryId,
+                      status: "sent" as const,
+                      type: resolvedType,
+                      aiIntent,
+                      aiConfidence,
+                      aiMeta,
+                    }
+                  : msg
+              )
+            );
+
+            appendMessage(entryId, "user", trimmedContent, {
+              messageKind: "entry",
+              entryType: resolvedType,
+              aiIntent,
+              aiConfidence,
+              aiMeta,
+            }).catch((error) => {
+              console.error("Unable to record entry message", error);
+            });
+
+            setIsTyping(true);
+
+            const reflection = result.reflection || "Saved. Keep going.";
+
+            // If action was suggested, store it
+            if (result.summary?.suggested_action) {
+              setPendingAction({
+                entryId,
+                action: result.summary.suggested_action,
+              });
+            }
+
+            // If goal was detected, store it
+            if (result.goal_detected && result.goal) {
+              setPendingGoal({
+                entryId,
+                goalData: result.goal,
+              });
+            }
+
+            timeoutRef.current = setTimeout(() => {
+              setIsTyping(false);
+
+              const botMessage: BotMessage = {
+                id: `bot-${entryId}`,
+                kind: "bot",
+                afterId: entryId,
+                content: reflection,
+                created_at: new Date().toISOString(),
+                status: "sent",
+              };
+
+              setMessages((prevMessages) => [...prevMessages, botMessage]);
+
+              appendMessage(entryId, "assistant", reflection, {
+                messageKind: "autoReply",
+                entryType: resolvedType,
+                afterId: entryId,
+                aiIntent,
+                aiConfidence,
+                aiMeta,
+              }).catch((error) => {
+                console.error("Unable to record auto-reply", error);
+              });
+            }, 1500);
+          }
+        } catch (error) {
+          setMessages((prevMessages) =>
+            prevMessages.map((msg) =>
+              msg.id === tempId ? { ...msg, status: "failed" as const } : msg
+            )
+          );
+          console.error("Error sending message:", error);
+        }
+      }
+
       return null;
     },
-    []
+    [onEntryCreated]
   );
 
   return {

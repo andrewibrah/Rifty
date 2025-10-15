@@ -39,6 +39,14 @@ export interface CreateEntryFromChatArgs {
 
 const SOURCE_TAG = "ai";
 
+async function getSupabaseUrl(): Promise<string> {
+  return supabase.supabaseUrl;
+}
+
+async function getAnonKey(): Promise<string> {
+  return supabase.supabaseKey;
+}
+
 async function getAccessToken(): Promise<string> {
   const { data, error } = await supabase.auth.getSession();
   if (error) {
