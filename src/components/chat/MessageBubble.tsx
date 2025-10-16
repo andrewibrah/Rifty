@@ -1,5 +1,5 @@
 import React, { memo, useMemo } from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Pressable } from "react-native";
 import type { ChatMessage } from "../../types/chat";
 import { getColors, radii, spacing, typography, shadows } from "../../theme";
 import { useTheme } from "../../contexts/ThemeContext";
@@ -9,10 +9,11 @@ interface MessageBubbleProps {
   isPartOfGroup: boolean;
   showTimestamp: boolean;
   onRetry?: (messageId: string) => void;
+  onLongPress?: (message: ChatMessage) => void;
 }
 
 const MessageBubble = memo(
-  ({ message, isPartOfGroup, showTimestamp, onRetry }: MessageBubbleProps) => {
+  ({ message, isPartOfGroup, showTimestamp, onRetry, onLongPress }: MessageBubbleProps) => {
     const { themeMode } = useTheme();
     const colors = getColors(themeMode);
     const styles = useMemo(() => createStyles(colors), [colors]);
@@ -37,6 +38,11 @@ const MessageBubble = memo(
       }
     };
 
+    const handleLongPress =
+      onLongPress && message.kind === "entry" && message.status === "sent"
+        ? () => onLongPress(message)
+        : undefined;
+
     return (
       <View
         style={[
@@ -45,11 +51,13 @@ const MessageBubble = memo(
           !isPartOfGroup && styles.firstInGroup,
         ]}
       >
-        <View
+        <Pressable
           style={[
             styles.bubbleWrapper,
             isBot ? styles.bubbleWrapperBot : styles.bubbleWrapperUser,
           ]}
+          onLongPress={handleLongPress}
+          delayLongPress={220}
         >
           <View style={styles.bubbleRow}>
             <View style={styles.bubbleShadow}>
@@ -112,7 +120,7 @@ const MessageBubble = memo(
               </View>
             </View>
           </View>
-        </View>
+        </Pressable>
         {showTimestamp && (
           <Text style={styles.timestamp}>
             {new Date(message.created_at).toLocaleTimeString([], {

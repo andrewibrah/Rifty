@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -7,11 +7,12 @@ import {
   ActivityIndicator,
   StyleSheet,
   Alert,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { EntryType, RemoteJournalEntry } from "../../services/data";
 import {
-  deleteJournalEntry,
+  deleteJournalEntries,
   listJournals,
   deleteAllEntriesByType,
 } from "../../services/data";
@@ -66,38 +67,186 @@ const MenuList: React.FC<MenuListProps> = ({
   const colors = getColors(themeMode);
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  const handleDeleteEntry = useCallback(
-    async (id: string) => {
-      Alert.alert(
-        "Delete Entry",
-        "Are you sure you want to delete this entry? This cannot be undone.",
-        [
-          {
-            text: "Cancel",
-            style: "cancel",
-          },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: async () => {
-              try {
-                await deleteJournalEntry(id);
-                const updatedEntries = await listJournals(
-                  selectedType
-                    ? { type: selectedType, limit: 100 }
-                    : { limit: 100 }
-                );
-                onEntriesUpdate(updatedEntries);
-              } catch (error) {
-                console.error("Error deleting entry:", error);
-              }
-            },
-          },
-        ]
-      );
-    },
-    [selectedType, onEntriesUpdate]
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedEntries, setSelectedEntries] = useState<
+    Map<string, RemoteJournalEntry>
+  >(() => new Map());
+
+  const selectedIds = useMemo(
+    () => Array.from(selectedEntries.keys()),
+    [selectedEntries]
   );
+  const selectedEntriesList = useMemo(
+    () =>
+      selectedIds
+        .map((id) => selectedEntries.get(id))
+        .filter(
+          (entry): entry is RemoteJournalEntry =>
+            entry != null && entry.id != null
+        ),
+    [selectedEntries, selectedIds]
+  );
+  const selectedCount = selectedIds.length;
+  const selectionKey = useMemo(
+    () => `${selectionMode ? "on" : "off"}-${selectedIds.join(",")}`,
+    [selectedIds, selectionMode]
+  );
+
+  useEffect(() => {
+    if (mode !== "entries" && selectionMode) {
+      setSelectedEntries(new Map());
+      setSelectionMode(false);
+    }
+  }, [mode, selectionMode]);
+
+  useEffect(() => {
+    if (!selectionMode) {
+      return;
+    }
+
+    setSelectedEntries((previous) => {
+      if (previous.size === 0) {
+        return previous;
+      }
+
+      const allowedIds = new Set(
+        entries
+          .map((entry) => entry.id)
+          .filter((id): id is string => typeof id === "string")
+      );
+
+      let changed = false;
+      const next = new Map<string, RemoteJournalEntry>();
+      previous.forEach((value, key) => {
+        if (allowedIds.has(key)) {
+          next.set(key, value);
+        } else {
+          changed = true;
+        }
+      });
+
+      if (!changed && next.size === previous.size) {
+        return previous;
+      }
+
+      return next;
+    });
+  }, [entries, selectionMode]);
+
+  useEffect(() => {
+    if (selectionMode && selectedEntries.size === 0) {
+      setSelectionMode(false);
+    }
+  }, [selectionMode, selectedEntries]);
+
+  const handleCancelSelection = useCallback(() => {
+    setSelectedEntries(new Map());
+    setSelectionMode(false);
+  }, []);
+
+  const handleToggleSelection = useCallback(
+    (entry: RemoteJournalEntry) => {
+      if (!entry.id) {
+        return;
+      }
+
+      setSelectedEntries((previous) => {
+        const next = new Map(previous);
+        if (next.has(entry.id!)) {
+          next.delete(entry.id!);
+        } else {
+          next.set(entry.id!, entry);
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleEntryLongPress = useCallback(
+    (entry: RemoteJournalEntry) => {
+      if (!entry.id) {
+        return;
+      }
+
+      if (!selectionMode) {
+        setSelectionMode(true);
+        setSelectedEntries(new Map([[entry.id, entry]]));
+        return;
+      }
+
+      handleToggleSelection(entry);
+    },
+    [handleToggleSelection, selectionMode]
+  );
+
+  const handleEntryPress = useCallback(
+    (entry: RemoteJournalEntry) => {
+      if (!entry.id) {
+        return;
+      }
+
+      if (selectionMode) {
+        handleToggleSelection(entry);
+        return;
+      }
+
+      onSelectEntry(entry.id);
+    },
+    [handleToggleSelection, onSelectEntry, selectionMode]
+  );
+
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedIds.length === 0) {
+      return;
+    }
+
+    const previewEntry = selectedEntriesList[0];
+    const normalizedPreview =
+      previewEntry?.content?.trim().replace(/\s+/g, " ") ?? "";
+    const truncatedPreview =
+      normalizedPreview.length > 60
+        ? `${normalizedPreview.slice(0, 60)}...`
+        : normalizedPreview;
+    const previewText =
+      selectedIds.length === 1 && truncatedPreview.length > 0
+        ? `"${truncatedPreview}"`
+        : `${selectedIds.length} entries`;
+    const deleteLabel = `Delete ${previewText}? This cannot be undone.`;
+
+    Alert.alert(
+      selectedIds.length === 1 ? "Delete Entry" : "Delete Entries",
+      deleteLabel,
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await deleteJournalEntries(selectedIds);
+              setSelectedEntries(new Map());
+              const updatedEntries = await listJournals(
+                selectedType
+                  ? { type: selectedType, limit: 100 }
+                  : { limit: 100 }
+              );
+              onEntriesUpdate(updatedEntries);
+            } catch (error) {
+              console.error("Error deleting entries:", error);
+              Alert.alert(
+                "Error",
+                "Unable to delete selected entries. Please try again."
+              );
+            }
+          },
+        },
+      ]
+    );
+  }, [onEntriesUpdate, selectedEntriesList, selectedIds, selectedType]);
 
   const handleClearAllEntries = useCallback(
     async (type: EntryType) => {
@@ -175,15 +324,37 @@ const MenuList: React.FC<MenuListProps> = ({
   const renderEntryItem = useCallback(
     ({ item }: { item: RemoteJournalEntry }) => {
       const updateCount = item.id ? annotationCounts[item.id] || 0 : 0;
+      const isSelected =
+        selectionMode && item.id != null && selectedEntries.has(item.id);
 
       return (
         <TouchableOpacity
-          style={styles.historyItem}
-          onPress={() => item.id && onSelectEntry(item.id)}
-          onLongPress={() => item.id && handleDeleteEntry(item.id)}
+          style={[
+            styles.historyItem,
+            selectionMode && styles.historyItemInSelectionMode,
+            selectionMode && styles.historyItemSelectable,
+            isSelected && styles.historyItemSelected,
+          ]}
+          onPress={() => handleEntryPress(item)}
+          onLongPress={() => handleEntryLongPress(item)}
+          delayLongPress={180}
+          activeOpacity={0.8}
         >
-          <View style={styles.historyItemContent}>
-            <Text style={styles.historyItemText}>{item.content}</Text>
+          <View
+            style={[
+              styles.historyItemContent,
+              selectionMode && styles.historyItemContentIndented,
+            ]}
+          >
+            <Text
+              style={[
+                styles.historyItemText,
+                isSelected && styles.historyItemTextSelected,
+              ]}
+              numberOfLines={3}
+            >
+              {item.content}
+            </Text>
             <View style={styles.historyItemFooter}>
               {item.created_at && (
                 <Text style={styles.historyItemDate}>
@@ -200,7 +371,15 @@ const MenuList: React.FC<MenuListProps> = ({
         </TouchableOpacity>
       );
     },
-    [annotationCounts, onSelectEntry, handleDeleteEntry, styles]
+    [
+      annotationCounts,
+      colors.background,
+      handleEntryLongPress,
+      handleEntryPress,
+      selectedEntries,
+      selectionMode,
+      styles,
+    ]
   );
 
   if (mode === "categories") {
@@ -250,13 +429,52 @@ const MenuList: React.FC<MenuListProps> = ({
               : `${item.type}-${item.created_at ?? ""}`
           }
           renderItem={renderEntryItem}
+          extraData={selectionKey}
+          contentContainerStyle={
+            selectionMode ? styles.selectionModeContent : undefined
+          }
         />
       </View>
-      {!entriesLoading &&
-        !entriesError &&
-        entries.length > 0 &&
-        selectedType && (
-          <View style={styles.fixedFooter}>
+      {!entriesLoading && !entriesError && entries.length > 0 && (
+        <View
+          style={[
+            styles.fixedFooter,
+            selectionMode && styles.fixedFooterSelection,
+          ]}
+        >
+          {selectionMode ? (
+            <>
+              <TouchableOpacity
+                onPress={handleCancelSelection}
+                style={styles.selectionFooterCancel}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.selectionFooterCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={styles.selectionFooterCount}>
+                {selectedCount} selected
+              </Text>
+              <TouchableOpacity
+                onPress={handleDeleteSelected}
+                disabled={selectedCount === 0}
+                style={[
+                  styles.selectionFooterDelete,
+                  selectedCount === 0 && styles.selectionFooterDeleteDisabled,
+                ]}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name="trash-outline"
+                  size={18}
+                  color={
+                    selectedCount === 0
+                      ? colors.textSecondary
+                      : colors.background
+                  }
+                />
+              </TouchableOpacity>
+            </>
+          ) : selectedType ? (
             <TouchableOpacity
               style={styles.deleteAllButton}
               onPress={() => handleClearAllEntries(selectedType)}
@@ -267,8 +485,9 @@ const MenuList: React.FC<MenuListProps> = ({
                 color={colors.textSecondary}
               />
             </TouchableOpacity>
-          </View>
-        )}
+          ) : null}
+        </View>
+      )}
     </View>
   );
 };
@@ -282,6 +501,9 @@ const createStyles = (colors: any) =>
     contentContainer: {
       flex: 1,
       padding: spacing.lg,
+    },
+    selectionModeContent: {
+      paddingBottom: spacing.xl,
     },
     sectionHint: {
       fontFamily: typography.body.fontFamily,
@@ -356,10 +578,55 @@ const createStyles = (colors: any) =>
     fixedFooter: {
       paddingHorizontal: spacing.lg,
       paddingVertical: spacing.sm,
+      marginBottom: spacing.md,
       borderTopWidth: 1,
       borderTopColor: colors.border,
       backgroundColor: colors.background,
       alignItems: "flex-end",
+    },
+    fixedFooterSelection: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    selectionFooterCancel: {
+      paddingVertical: spacing.xs,
+      paddingHorizontal: spacing.md,
+      borderRadius: radii.sm,
+    },
+    selectionFooterCancelText: {
+      fontFamily: typography.body.fontFamily,
+      fontWeight: "600" as const,
+      fontSize: 14,
+      color: colors.textSecondary,
+      letterSpacing: 0.3,
+    },
+    selectionFooterCount: {
+      flex: 1,
+      textAlign: "center" as const,
+      fontFamily: typography.body.fontFamily,
+      fontWeight: "600" as const,
+      fontSize: 12,
+      color: colors.textSecondary,
+      letterSpacing: 0.2,
+      backgroundColor: colors.surface,
+      paddingVertical: spacing.xs,
+      paddingHorizontal: spacing.md,
+      borderRadius: radii.pill,
+      marginHorizontal: spacing.sm,
+    },
+    selectionFooterDelete: {
+      paddingVertical: spacing.xs,
+      paddingHorizontal: spacing.md,
+      borderRadius: radii.sm,
+      backgroundColor: colors.accent,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    selectionFooterDeleteDisabled: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
     },
     deleteAllButton: {
       alignItems: "center",
@@ -373,9 +640,39 @@ const createStyles = (colors: any) =>
       paddingVertical: spacing.md,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
+      flexDirection: "row",
+      alignItems: "flex-start",
+    },
+    historyItemInSelectionMode: {
+      paddingLeft: spacing.sm,
+      paddingRight: spacing.sm,
+      marginBottom: spacing.sm,
+      borderBottomWidth: 0,
+    },
+    historyItemSelectable: {
+      borderRadius: radii.md,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      shadowColor: colors.textPrimary,
+      shadowOpacity: Platform.OS === "ios" ? 0.08 : 0,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: Platform.OS === "android" ? 1 : 0,
+    },
+    historyItemSelected: {
+      backgroundColor: colors.surfaceElevated,
+      borderColor: colors.accent,
+      shadowColor: colors.accent,
+      shadowOpacity: Platform.OS === "ios" ? 0.12 : 0,
+      shadowRadius: 12,
+      elevation: Platform.OS === "android" ? 2 : 0,
     },
     historyItemContent: {
       flex: 1,
+    },
+    historyItemContentIndented: {
+      marginLeft: spacing.sm,
     },
     historyItemText: {
       fontFamily: typography.body.fontFamily,
@@ -384,6 +681,10 @@ const createStyles = (colors: any) =>
       fontSize: 16,
       color: colors.textPrimary,
       marginBottom: spacing.xs,
+    },
+    historyItemTextSelected: {
+      color: colors.textPrimary,
+      opacity: 0.9,
     },
     historyItemFooter: {
       flexDirection: "row",

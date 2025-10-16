@@ -151,8 +151,26 @@ export async function deleteJournalEntry(id: string): Promise<void> {
   const { error } = await supabase
     .from('entries')
     .delete()
-    .eq('id', id)
     .eq('user_id', user.id)
+    .eq('id', id)
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function deleteJournalEntries(ids: string[]): Promise<void> {
+  if (ids.length === 0) {
+    return
+  }
+
+  const user = await requireUser()
+
+  const { error } = await supabase
+    .from('entries')
+    .delete()
+    .eq('user_id', user.id)
+    .in('id', ids)
 
   if (error) {
     throw error

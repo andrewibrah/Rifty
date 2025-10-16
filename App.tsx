@@ -215,6 +215,39 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     retryMessage(messageId);
   };
 
+  const handleMessageLongPress = useCallback(
+    (message: ChatMessage) => {
+      if (message.kind !== "entry" || message.status !== "sent") {
+        return;
+      }
+
+      Alert.alert(
+        "Entry Options",
+        "Open this entry's dedicated chat?",
+        [
+          {
+            text: "Cancel",
+            style: "cancel",
+          },
+          {
+            text: "Open entry chat",
+            onPress: () => {
+              menuState.setSelectedEntry(null);
+              menuState.handleSelectType(message.type);
+              setTimeout(() => {
+                menuState.handleSelectEntry(message.id);
+              }, 0);
+              setShowMenu(true);
+              animateMainContent(300);
+            },
+          },
+        ],
+        { cancelable: true }
+      );
+    },
+    [animateMainContent, menuState]
+  );
+
   const messageGroups = groupMessages(messages);
 
   const renderItem = ({
@@ -231,6 +264,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
           isPartOfGroup={msgIndex !== 0}
           showTimestamp={msgIndex === group.messages.length - 1}
           onRetry={handleRetry}
+          onLongPress={
+            message.kind === "entry" ? handleMessageLongPress : undefined
+          }
         />
       ))}
     </View>
