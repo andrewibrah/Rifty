@@ -28,6 +28,9 @@ export type RemoteJournalEntry = {
   ai_confidence?: Nullable<number>
   ai_meta?: Nullable<Record<string, any>>
   source?: Nullable<string>
+  mood?: Nullable<string>
+  feeling_tags?: string[]
+  linked_moments?: string[]
 }
 
 export async function listMessages(
@@ -124,6 +127,8 @@ export async function createJournalEntry(params: {
   type: EntryType
   content: string
   metadata?: Record<string, any>
+  mood?: string | null
+  feeling_tags?: string[]
 }): Promise<RemoteJournalEntry> {
   const user = await requireUser()
 
@@ -134,7 +139,43 @@ export async function createJournalEntry(params: {
       type: params.type,
       content: params.content,
       metadata: params.metadata ?? null,
+      mood: params.mood ?? null,
+      feeling_tags: params.feeling_tags ?? [],
     })
+    .select()
+    .single()
+
+  if (error) {
+    throw error
+  }
+
+  return data as RemoteJournalEntry
+}
+
+export async function updateJournalEntry(
+  entryId: string,
+  updates: {
+    content?: string
+    metadata?: Record<string, any> | null
+    mood?: string | null
+    feeling_tags?: string[]
+    linked_moments?: string[]
+  }
+): Promise<RemoteJournalEntry> {
+  const user = await requireUser()
+
+  const payload: Record<string, any> = {}
+  if (updates.content !== undefined) payload.content = updates.content
+  if (updates.metadata !== undefined) payload.metadata = updates.metadata
+  if (updates.mood !== undefined) payload.mood = updates.mood
+  if (updates.feeling_tags !== undefined) payload.feeling_tags = updates.feeling_tags
+  if (updates.linked_moments !== undefined) payload.linked_moments = updates.linked_moments
+
+  const { data, error } = await supabase
+    .from('entries')
+    .update(payload)
+    .eq('id', entryId)
+    .eq('user_id', user.id)
     .select()
     .single()
 

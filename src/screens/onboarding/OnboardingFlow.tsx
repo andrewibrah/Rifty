@@ -62,6 +62,8 @@ const defaultState: PersonalizationState = {
   logging_format: "mixed",
   drift_rule: { enabled: false, after: null },
   crisis_card: null,
+  checkin_notifications: true,
+  missed_day_notifications: true,
 };
 
 const STEPS = 7;

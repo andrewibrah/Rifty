@@ -2,6 +2,11 @@ import { useState, useCallback, useEffect } from "react";
 import type { Annotation } from "../types/annotations";
 import type { RemoteJournalEntry } from "../services/data";
 import { listMessages, getJournalEntryById } from "../services/data";
+import { getEntrySummary } from "../services/summarization";
+import {
+  listAtomicMomentsForEntry,
+  type AtomicMomentRecord,
+} from "../services/atomicMoments";
 
 export const useEntryChat = (
   selectedEntryId: string | null,
@@ -13,6 +18,9 @@ export const useEntryChat = (
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [annotationsLoading, setAnnotationsLoading] = useState(false);
   const [annotationsError, setAnnotationsError] = useState<string | null>(null);
+  const [entrySummary, setEntrySummary] = useState<string | null>(null);
+  const [entryEmotion, setEntryEmotion] = useState<string | null>(null);
+  const [entryMoments, setEntryMoments] = useState<AtomicMomentRecord[]>([]);
 
   // Load entry details and annotations
   useEffect(() => {
@@ -28,9 +36,11 @@ export const useEntryChat = (
       setAnnotationsLoading(true);
       setAnnotationsError(null);
       try {
-        const [entry, messages] = await Promise.all([
+        const [entry, messages, summary, moments] = await Promise.all([
           getJournalEntryById(selectedEntryId),
           listMessages(selectedEntryId, { limit: 200 }),
+          getEntrySummary(selectedEntryId),
+          listAtomicMomentsForEntry(selectedEntryId, { limit: 20 }),
         ]);
 
         if (!isCancelled) {
@@ -38,6 +48,9 @@ export const useEntryChat = (
           setAnnotations(
             messages.map(mapMessageToAnnotation).filter(isNotNull)
           );
+          setEntrySummary(summary?.summary ?? null);
+          setEntryEmotion(summary?.emotion ?? null);
+          setEntryMoments(moments);
         }
       } catch (error) {
         console.error("Error loading entry detail", error);
@@ -75,8 +88,17 @@ export const useEntryChat = (
     setAnnotationsLoading(true);
     setAnnotationsError(null);
     try {
-      const messages = await listMessages(selectedEntryId, { limit: 200 });
+      const [entry, messages, summary, moments] = await Promise.all([
+        getJournalEntryById(selectedEntryId),
+        listMessages(selectedEntryId, { limit: 200 }),
+        getEntrySummary(selectedEntryId),
+        listAtomicMomentsForEntry(selectedEntryId, { limit: 20 }),
+      ]);
+      setSelectedEntry(entry);
       setAnnotations(messages.map(mapMessageToAnnotation).filter(isNotNull));
+      setEntrySummary(summary?.summary ?? null);
+      setEntryEmotion(summary?.emotion ?? null);
+      setEntryMoments(moments);
     } catch (error) {
       console.error("Error refreshing annotations", error);
       setAnnotationsError("Unable to refresh annotations.");
@@ -90,6 +112,9 @@ export const useEntryChat = (
     annotations,
     annotationsLoading,
     annotationsError,
+    entrySummary,
+    entryEmotion,
+    entryMoments,
     setAnnotations: handleAnnotationsUpdate,
     onErrorUpdate: handleErrorUpdate,
     refreshAnnotations,

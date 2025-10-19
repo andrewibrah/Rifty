@@ -17,7 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Annotation } from "../../types/annotations";
 import type { RemoteJournalEntry, EntryType } from "../../services/data";
-import { appendMessage } from "../../services/data";
+import { appendMessage, updateJournalEntry } from "../../services/data";
 import { supabase } from "../../lib/supabase";
 import { generateAIResponse, formatAnnotationLabel } from "../../services/ai";
 import { predictIntent, isEntryChatAllowed } from "../../lib/intent";
@@ -28,12 +28,19 @@ import type {
 import type { ProcessingStepId } from "../../types/intent";
 import { getColors, radii, spacing, typography, shadows } from "../../theme";
 import { useTheme } from "../../contexts/ThemeContext";
+import {
+  createAtomicMoment,
+  type AtomicMomentRecord,
+} from "../../services/atomicMoments";
 
 interface MenuEntryChatProps {
   entry: RemoteJournalEntry;
   annotations: Annotation[];
   loading: boolean;
   error: string | null;
+  summary?: string | null;
+  emotion?: string | null;
+  moments?: AtomicMomentRecord[];
   onAnnotationsUpdate: (annotations: Annotation[]) => void;
   onAnnotationCountUpdate: (entryId: string, delta: number) => void;
   onErrorUpdate: (error: string | null) => void;
@@ -49,6 +56,31 @@ const createProcessingTimeline = (): ProcessingStep[] => [
   { id: "knowledge_search", label: "Knowledge base", status: "pending" },
   { id: "openai_request", label: "OpenAI request", status: "pending" },
   { id: "openai_response", label: "OpenAI received", status: "pending" },
+];
+
+const MOOD_OPTIONS = [
+  "Centered",
+  "Calm",
+  "Optimistic",
+  "Grateful",
+  "Productive",
+  "Anxious",
+  "Overwhelmed",
+  "Drained",
+  "Reflective",
+];
+
+const FEELING_OPTIONS = [
+  "Inspired",
+  "Stressed",
+  "Curious",
+  "Connected",
+  "Lonely",
+  "Proud",
+  "Frustrated",
+  "Hopeful",
+  "Tired",
+  "Motivated",
 ];
 
 const updateTimelineStep = (
@@ -79,6 +111,9 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
   annotations,
   loading,
   error,
+  summary,
+  emotion,
+  moments = [],
   onAnnotationsUpdate,
   onAnnotationCountUpdate,
   onErrorUpdate,
@@ -146,6 +181,42 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     onAnnotationCountUpdate,
     onErrorUpdate,
   ]);
+
+  const [selectedMood, setSelectedMood] = useState<string | null>(null);
+  const [selectedFeelings, setSelectedFeelings] = useState<string[]>([]);
+
+  useEffect(() => {
+    setSelectedMood(entry.mood ?? null);
+    setSelectedFeelings(entry.feeling_tags ?? []);
+  }, [entry.id, entry.mood, entry.feeling_tags]);
+
+  const handleMoodSelect = useCallback(
+    async (nextMood: string) => {
+      setSelectedMood(nextMood);
+      try {
+        await updateJournalEntry(entry.id, { mood: nextMood });
+      } catch (error) {
+        console.error("Failed to update mood", error);
+        onErrorUpdate("Unable to update mood right now.");
+      }
+    },
+    [entry.id, onErrorUpdate]
+  );
+
+  const handleToggleFeeling = useCallback(
+    async (feeling: string) => {
+      setSelectedFeelings((prev) => {
+        const exists = prev.includes(feeling);
+        const next = exists ? prev.filter((item) => item !== feeling) : [...prev, feeling];
+        updateJournalEntry(entry.id, { feeling_tags: next }).catch((error) => {
+          console.error("Failed to update feelings", error);
+          onErrorUpdate("Unable to update feelings right now.");
+        });
+        return next;
+      });
+    },
+    [entry.id, onErrorUpdate]
+  );
 
   const handleAskAI = useCallback(async () => {
     if (!entry || !entry.id) return;
@@ -306,6 +377,37 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     }
   }, [annotations, composerText, entry, onAnnotationsUpdate, onErrorUpdate]);
 
+  const handleSaveAtomicMoment = useCallback(
+    async (annotation: Annotation) => {
+      if (!entry || !entry.id) return;
+      try {
+        const moment = await createAtomicMoment({
+          entryId: entry.id,
+          messageId: annotation.id ?? null,
+          content: annotation.content,
+          tags: ["manual"],
+          importanceScore: 6,
+        });
+
+        await updateJournalEntry(entry.id, {
+          linked_moments: [
+            ...(entry.linked_moments ?? []),
+            moment.id,
+          ],
+        });
+
+        if (onRefreshAnnotations) {
+          await onRefreshAnnotations();
+        }
+        Alert.alert("Saved", "Added to Atomic Moments.");
+      } catch (error) {
+        console.error("Failed to save atomic moment", error);
+        Alert.alert("Error", "Unable to save atomic moment right now.");
+      }
+    },
+    [entry, onRefreshAnnotations]
+  );
+
   const renderAnnotationItem = useCallback(({ item }: { item: Annotation }) => {
     const isUser = item.kind === "user";
     const isNote = item.channel === "note";
@@ -404,11 +506,26 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
                 })}
               </Text>
             )}
+            {isUser && (
+              <View style={styles.annotationActions}>
+                <TouchableOpacity
+                  onPress={() => handleSaveAtomicMoment(item)}
+                  style={styles.atomicMomentButton}
+                >
+                  <Ionicons
+                    name="sparkles-outline"
+                    size={14}
+                    color={colors.accent}
+                  />
+                  <Text style={styles.atomicMomentButtonText}>Save Moment</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
       </View>
     );
-  }, []);
+  }, [colors.accent, handleSaveAtomicMoment]);
 
   const disableNoteSend = isSavingNote || !composerText.trim();
   const disableAISend = isWorkingWithAI || !composerText.trim();
@@ -487,6 +604,104 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
             <Text style={styles.entrySummaryDate}>
               {new Date(entry.created_at).toLocaleString()}
             </Text>
+          )}
+          {summary ? (
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryTitle}>Highlights</Text>
+              <Text style={styles.summaryBody}>{summary}</Text>
+              {emotion && (
+                <Text style={styles.summaryFooter}>{`Emotion: ${emotion}`}</Text>
+              )}
+            </View>
+          ) : null}
+          {entry.type === "journal" && (
+            <>
+              <View style={styles.moodContainer}>
+                <Text style={styles.sectionLabel}>Mood</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.moodScroll}
+                >
+                  {MOOD_OPTIONS.map((mood) => {
+                    const active = selectedMood === mood;
+                    return (
+                      <TouchableOpacity
+                        key={mood}
+                        style={[
+                          styles.moodChip,
+                          active && styles.moodChipActive,
+                        ]}
+                        onPress={() => handleMoodSelect(mood)}
+                      >
+                        <Text
+                          style={[
+                            styles.moodChipText,
+                            active && styles.moodChipTextActive,
+                          ]}
+                        >
+                          {mood}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+              <View style={styles.feelingsContainer}>
+                <Text style={styles.sectionLabel}>Feelings</Text>
+                <View style={styles.feelingsWrap}>
+                  {FEELING_OPTIONS.map((feeling) => {
+                    const active = selectedFeelings.includes(feeling);
+                    return (
+                      <TouchableOpacity
+                        key={feeling}
+                        style={[
+                          styles.feelingChip,
+                          active && styles.feelingChipActive,
+                        ]}
+                        onPress={() => handleToggleFeeling(feeling)}
+                      >
+                        <Text
+                          style={[
+                            styles.feelingChipText,
+                            active && styles.feelingChipTextActive,
+                          ]}
+                        >
+                          {feeling}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            </>
+          )}
+          {moments.length > 0 && (
+            <View style={styles.momentsContainer}>
+              <Text style={styles.sectionLabel}>Atomic Moments</Text>
+              {moments.map((moment) => (
+                <View key={moment.id} style={styles.momentCard}>
+                  <View style={styles.momentHeader}>
+                    <Ionicons
+                      name="sparkles-outline"
+                      size={16}
+                      color={colors.accent}
+                    />
+                    <Text style={styles.momentScore}>{`Importance ${moment.importance_score}/10`}</Text>
+                  </View>
+                  <Text style={styles.momentContent}>{moment.content}</Text>
+                  {moment.tags?.length ? (
+                    <View style={styles.momentTags}>
+                      {moment.tags.map((tag) => (
+                        <View key={tag} style={styles.momentTagChip}>
+                          <Text style={styles.momentTagText}>{tag}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              ))}
+            </View>
           )}
         </View>
       )}
@@ -800,6 +1015,146 @@ const createStyles = (colors: any, insets: any) =>
       fontSize: 12,
       color: colors.textSecondary,
     },
+    summaryCard: {
+      marginTop: spacing.md,
+      backgroundColor: colors.surface,
+      borderRadius: radii.md,
+      padding: spacing.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    summaryTitle: {
+      fontFamily: typography.caption.fontFamily,
+      fontWeight: "600",
+      letterSpacing: typography.caption.letterSpacing,
+      fontSize: 12,
+      textTransform: "uppercase",
+      color: colors.textSecondary,
+      marginBottom: spacing.xs,
+    },
+    summaryBody: {
+      fontFamily: typography.body.fontFamily,
+      fontSize: 15,
+      lineHeight: 22,
+      color: colors.textPrimary,
+    },
+    summaryFooter: {
+      fontFamily: typography.caption.fontFamily,
+      fontSize: 12,
+      color: colors.textSecondary,
+      marginTop: spacing.sm,
+    },
+    moodContainer: {
+      marginTop: spacing.lg,
+    },
+    sectionLabel: {
+      fontFamily: typography.caption.fontFamily,
+      fontWeight: "600",
+      letterSpacing: typography.caption.letterSpacing,
+      fontSize: 12,
+      color: colors.textSecondary,
+      textTransform: "uppercase",
+      marginBottom: spacing.xs,
+    },
+    moodScroll: {
+      paddingVertical: spacing.xs,
+      gap: spacing.sm,
+    },
+    moodChip: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radii.xl,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginRight: spacing.sm,
+    },
+    moodChipActive: {
+      borderColor: colors.accent,
+      backgroundColor: `${colors.accent}1A`,
+    },
+    moodChipText: {
+      fontFamily: typography.body.fontFamily,
+      fontSize: 14,
+      color: colors.textSecondary,
+    },
+    moodChipTextActive: {
+      color: colors.accent,
+      fontWeight: "600",
+    },
+    feelingsContainer: {
+      marginTop: spacing.lg,
+    },
+    feelingsWrap: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.sm,
+    },
+    feelingChip: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+      borderRadius: radii.xl,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    feelingChipActive: {
+      borderColor: colors.accent,
+      backgroundColor: `${colors.accent}14`,
+    },
+    feelingChipText: {
+      fontFamily: typography.caption.fontFamily,
+      fontSize: 12,
+      color: colors.textSecondary,
+    },
+    feelingChipTextActive: {
+      color: colors.accent,
+      fontWeight: "600",
+    },
+    momentsContainer: {
+      marginTop: spacing.lg,
+      gap: spacing.sm,
+    },
+    momentCard: {
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: spacing.md,
+      marginBottom: spacing.sm,
+    },
+    momentHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+      marginBottom: spacing.xs,
+    },
+    momentScore: {
+      fontFamily: typography.caption.fontFamily,
+      fontSize: 12,
+      color: colors.textSecondary,
+    },
+    momentContent: {
+      fontFamily: typography.body.fontFamily,
+      fontSize: 14,
+      lineHeight: 20,
+      color: colors.textPrimary,
+    },
+    momentTags: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.xs,
+      marginTop: spacing.sm,
+    },
+    momentTagChip: {
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      borderRadius: radii.xl,
+      backgroundColor: colors.surfaceElevated,
+    },
+    momentTagText: {
+      fontFamily: typography.caption.fontFamily,
+      fontSize: 11,
+      color: colors.textSecondary,
+    },
     loadingIndicator: {
       marginTop: spacing.lg,
     },
@@ -898,6 +1253,23 @@ const createStyles = (colors: any, insets: any) =>
     },
     annotationTimestampOther: {
       color: colors.textSecondary,
+    },
+    annotationActions: {
+      marginTop: spacing.sm,
+      flexDirection: "row",
+      justifyContent: "flex-end",
+    },
+    atomicMomentButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+    },
+    atomicMomentButtonText: {
+      fontFamily: typography.caption.fontFamily,
+      fontSize: 11,
+      color: colors.accent,
+      fontWeight: "600",
+      textTransform: "uppercase",
     },
     noteInputRow: {
       borderTopWidth: 1,

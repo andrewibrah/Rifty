@@ -76,6 +76,9 @@ const fetchProfile = async (): Promise<ProfileSnapshot | null> => {
           : fallbackTimezone,
       onboarding_completed: Boolean(rawProfile.onboarding_completed),
       updated_at: (rawProfile.updated_at as string | null) ?? nowIso(),
+      missed_day_count: Number(rawProfile.missed_day_count ?? 0),
+      current_streak: Number(rawProfile.current_streak ?? 0),
+      last_message_at: (rawProfile.last_message_at as string | null) ?? null,
     };
     return profile;
   }
@@ -86,6 +89,9 @@ const fetchProfile = async (): Promise<ProfileSnapshot | null> => {
     timezone,
     onboarding_completed: false,
     updated_at: nowIso(),
+    missed_day_count: 0,
+    current_streak: 0,
+    last_message_at: null,
   };
 
   const insertPayload: Record<string, any> = {
@@ -93,6 +99,9 @@ const fetchProfile = async (): Promise<ProfileSnapshot | null> => {
     email: user.email,
     timezone,
     onboarding_completed: false,
+    missed_day_count: 0,
+    current_streak: 0,
+    last_message_at: null,
   };
 
   const { error: insertError } = await supabase
@@ -276,6 +285,51 @@ export const persistPersonalization = async (
   }
 
   return personaTag;
+};
+
+export const updateNotificationPreferences = async (prefs: {
+  checkin_notifications?: boolean;
+  missed_day_notifications?: boolean;
+}): Promise<void> => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    throw new Error("User not authenticated");
+  }
+
+  const payload: Record<string, any> = {};
+  if (prefs.checkin_notifications !== undefined) {
+    payload.checkin_notifications = prefs.checkin_notifications;
+  }
+  if (prefs.missed_day_notifications !== undefined) {
+    payload.missed_day_notifications = prefs.missed_day_notifications;
+  }
+  if (Object.keys(payload).length === 0) {
+    return;
+  }
+
+  const { error } = await supabase
+    .from("user_settings")
+    .upsert({
+      user_id: user.id,
+      ...payload,
+      updated_at: nowIso(),
+    }, { onConflict: "user_id" });
+
+  if (error) {
+    throw error;
+  }
+
+  const cached = await loadCachedSettings();
+  if (cached) {
+    const updated = {
+      ...cached,
+      ...payload,
+      updated_at: nowIso(),
+    };
+    await storeCachedSettings(updated);
+  }
 };
 
 export const exportPersonalization = async (): Promise<string> => {

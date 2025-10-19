@@ -23,6 +23,69 @@ import { generateMainChatReply } from "../services/mainChat";
 import { buildPredictionFromNative, mapIntentToEntryType } from "../lib/intent";
 import { Memory } from "@/agent/memory";
 import type { PlannerResponse } from "@/agent/types";
+import { createGoal, listGoals } from "../services/goals";
+import { generateUUID } from "../utils/id";
+
+const MAX_ACTIVE_GOALS = 3;
+
+type PlannerGoalShape = {
+  title: string | null;
+  description: string | null;
+  category: string | null;
+  targetDate: string | null;
+  microSteps: string[];
+};
+
+const normalizeGoalPayload = (
+  raw: Record<string, any>,
+  fallbackContent: string
+): PlannerGoalShape => {
+  const safeString = (value: unknown): string | null => {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+    return null;
+  };
+
+  const title =
+    safeString(raw.title) ||
+    safeString(raw.goalTitle) ||
+    fallbackContent.slice(0, 120);
+
+  const description =
+    safeString(raw.description) ||
+    safeString(raw.summary) ||
+    null;
+
+  const category = safeString(raw.category) || safeString(raw.area) || null;
+
+  const targetDate = safeString(raw.targetDate || raw.deadline || raw.dueDate);
+
+  const microStepsRaw = Array.isArray(raw.microSteps)
+    ? raw.microSteps
+    : Array.isArray(raw.milestones)
+      ? raw.milestones
+      : [];
+
+  const microSteps = microStepsRaw
+    .map((step: unknown) => safeString(step))
+    .filter((step): step is string => Boolean(step));
+
+  return {
+    title,
+    description,
+    category,
+    targetDate,
+    microSteps,
+  };
+};
+
+const buildMicroSteps = (steps: string[]): { id: string; description: string; completed: boolean }[] =>
+  steps.map((step) => ({
+    id: generateUUID(),
+    description: step,
+    completed: false,
+  }));
 
 /**
  * Detect if input is a question (analyst mode) or an entry
@@ -191,8 +254,13 @@ export interface IntentReviewTicket {
   entryType: EntryType;
 }
 
+interface UseChatStateOptions {
+  onBotMessage?: (message: BotMessage) => void;
+}
+
 export const useChatState = (
-  onEntryCreated?: () => void
+  onEntryCreated?: () => void,
+  options?: UseChatStateOptions
 ): {
   messages: ChatMessage[];
   pendingAction: { entryId: string; action: string } | null;
@@ -486,10 +554,40 @@ export const useChatState = (
 
           advanceTimeline("openai_request", "running", "Generating response");
 
+          const botMessageId = `bot-${tempId}`;
+          const botTimestamp = new Date().toISOString();
+          let streamingReply = "";
+          let finalBotMessage: BotMessage | null = null;
+
+          const placeholderMessage: BotMessage = {
+            id: botMessageId,
+            kind: "bot",
+            afterId: tempId,
+            content: "",
+            created_at: botTimestamp,
+            status: "sending",
+          };
+
+          setMessages((prevMessages) => [...prevMessages, placeholderMessage]);
+
           const mainReply = await generateMainChatReply({
             userText: trimmedContent,
             intent: intentPayload,
             planner,
+            onToken: (chunk) => {
+              streamingReply += chunk;
+              setMessages((prevMessages) =>
+                prevMessages.map((msg) =>
+                  msg.id === botMessageId && msg.kind === "bot"
+                    ? {
+                        ...msg,
+                        content: streamingReply,
+                        status: "sending",
+                      }
+                    : msg
+                )
+              );
+            },
           });
 
           advanceTimeline("openai_request", "done", "Prompt dispatched");
@@ -517,16 +615,29 @@ export const useChatState = (
             )
           );
 
-          const botMessage: BotMessage = {
-            id: `bot-${tempId}`,
+          finalBotMessage = {
+            id: botMessageId,
             kind: "bot",
             afterId: tempId,
             content: mainReply.reply,
-            created_at: new Date().toISOString(),
+            created_at: botTimestamp,
             status: "sent",
           };
 
-          setMessages((prevMessages) => [...prevMessages, botMessage]);
+          setMessages((prevMessages) =>
+            prevMessages.map((msg) =>
+              msg.id === botMessageId && msg.kind === "bot"
+                ? {
+                    ...msg,
+                    content: mainReply.reply,
+                    status: "sent",
+                    created_at: botTimestamp,
+                  }
+                : msg
+            )
+          );
+
+          options?.onBotMessage?.(finalBotMessage);
 
           const toolExecution = handleToolCall(planner, {
             originalText: trimmedContent,
@@ -662,6 +773,65 @@ export const useChatState = (
                 console.warn("[Chat] memory upsert failed", memoryError);
               }
 
+              if (toolExecution?.action === "goal.create" && toolPayload) {
+                try {
+                  const goalShape = normalizeGoalPayload(
+                    toolPayload,
+                    trimmedContent
+                  );
+
+                  if (goalShape.title) {
+                    const activeGoals = await listGoals({
+                      status: "active",
+                      limit: MAX_ACTIVE_GOALS + 1,
+                    });
+
+                    const activeCount = activeGoals.filter(
+                      (goal) => goal.status === "active"
+                    ).length;
+
+                    if (activeCount >= MAX_ACTIVE_GOALS) {
+                      const limitMessage: BotMessage = {
+                        id: `bot-${generateUUID()}`,
+                        kind: "bot",
+                        afterId: savedEntry.id,
+                        content:
+                          "You already have three active goals. Archive or complete one before starting another.",
+                        created_at: new Date().toISOString(),
+                        status: "sent",
+                      };
+                      setMessages((prev) => [...prev, limitMessage]);
+                      options?.onBotMessage?.(limitMessage);
+                    } else {
+                      const created = await createGoal({
+                        title: goalShape.title,
+                        description: goalShape.description ?? undefined,
+                        category: goalShape.category ?? undefined,
+                        target_date: goalShape.targetDate ?? undefined,
+                        micro_steps: buildMicroSteps(goalShape.microSteps),
+                        source_entry_id: savedEntry.id,
+                        metadata: {
+                          plannerPayload: toolPayload,
+                        },
+                      });
+
+                      const celebration: BotMessage = {
+                        id: `bot-${generateUUID()}`,
+                        kind: "bot",
+                        afterId: savedEntry.id,
+                        content: `Goal captured: ${created.title}`,
+                        created_at: new Date().toISOString(),
+                        status: "sent",
+                      };
+                      setMessages((prev) => [...prev, celebration]);
+                      options?.onBotMessage?.(celebration);
+                    }
+                  }
+                } catch (goalError) {
+                  console.warn("[Chat] goal creation failed", goalError);
+                }
+              }
+
               if (onEntryCreated) {
                 onEntryCreated();
               }
@@ -695,6 +865,12 @@ export const useChatState = (
             "error",
             error instanceof Error ? error.message : "Unable to process message"
           );
+          const placeholderId = typeof tempId === "string" ? `bot-${tempId}` : null;
+          if (placeholderId) {
+            setMessages((prevMessages) =>
+              prevMessages.filter((msg) => msg.id !== placeholderId)
+            );
+          }
           setMessages((prevMessages) =>
             prevMessages.map((msg) =>
               msg.id === tempId && msg.kind === "entry"

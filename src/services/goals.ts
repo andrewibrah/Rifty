@@ -7,6 +7,8 @@ import type {
   MicroStep,
 } from '../types/mvp'
 
+const MAX_ACTIVE_GOALS = 3
+
 /**
  * Create a new goal
  */
@@ -18,6 +20,20 @@ export async function createGoal(params: CreateGoalParams): Promise<Goal> {
 
   if (authError || !user) {
     throw new Error('User not authenticated')
+  }
+
+  const { count: activeCount, error: countError } = await supabase
+    .from('goals')
+    .select('id', { head: true, count: 'exact' })
+    .eq('user_id', user.id)
+    .eq('status', 'active')
+
+  if (countError) {
+    console.error('[createGoal] count error', countError)
+  }
+
+  if ((activeCount ?? 0) >= MAX_ACTIVE_GOALS) {
+    throw new Error('MAX_ACTIVE_GOALS_REACHED')
   }
 
   const { data, error } = await supabase

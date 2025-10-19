@@ -45,8 +45,10 @@
   "devDependencies": {
     "@types/node": "^24.6.2",
     "@types/react": "~19.1.0",
+    "eslint": "^9.38.0",
     "expo-module-scripts": "^5.0.7",
     "patch-package": "^8.0.0",
+    "semgrep": "^0.0.1",
     "ts-node": "^10.9.2",
     "typescript": "~5.9.2"
   },

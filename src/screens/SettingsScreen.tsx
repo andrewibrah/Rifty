@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -11,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
 import { getColors, radii, spacing, typography } from "../theme";
 import { useTheme } from "../contexts/ThemeContext";
+import { exportUserData } from "../services/export";
 import type { Session } from "@supabase/supabase-js";
 
 interface SettingsScreenProps {
@@ -27,6 +28,28 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const { themeMode, toggleTheme, isDark, isSystemTheme } = useTheme();
   const colors = getColors(themeMode);
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const [missedDayCount, setMissedDayCount] = useState<number>(0);
+  const [currentStreak, setCurrentStreak] = useState<number>(0);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchProfile = async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("missed_day_count, current_streak")
+        .eq("id", session.user.id)
+        .maybeSingle();
+      if (!isMounted) return;
+      if (!error && data) {
+        setMissedDayCount(Number(data.missed_day_count ?? 0));
+        setCurrentStreak(Number(data.current_streak ?? 0));
+      }
+    };
+    fetchProfile();
+    return () => {
+      isMounted = false;
+    };
+  }, [session.user.id]);
 
   return (
     <View style={styles.container}>
@@ -47,11 +70,11 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({
           {/* Account Section */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Account</Text>
-            <View style={styles.settingsCard}>
-              <View style={styles.settingRow}>
-                <View style={styles.iconContainer}>
-                  <Ionicons
-                    name="person-outline"
+          <View style={styles.settingsCard}>
+            <View style={styles.settingRow}>
+              <View style={styles.iconContainer}>
+                <Ionicons
+                  name="person-outline"
                     size={18}
                     color={colors.accent}
                   />
@@ -61,10 +84,37 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({
                   <Text style={styles.settingValue}>
                     {session?.user?.email}
                   </Text>
-                </View>
+              </View>
+            </View>
+            <View style={styles.divider} />
+            <View style={styles.settingRow}>
+              <View style={styles.iconContainer}>
+                <Ionicons
+                  name="flame-outline"
+                  size={18}
+                  color={colors.accent}
+                />
+              </View>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Current streak</Text>
+                <Text style={styles.settingValue}>{`${currentStreak} day${currentStreak === 1 ? "" : "s"}`}</Text>
+              </View>
+            </View>
+            <View style={styles.settingRow}>
+              <View style={styles.iconContainer}>
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={18}
+                  color={colors.accent}
+                />
+              </View>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Missed days</Text>
+                <Text style={styles.settingValue}>{missedDayCount}</Text>
               </View>
             </View>
           </View>
+        </View>
 
           {/* Preferences Section */}
           <View style={styles.section}>
@@ -134,10 +184,17 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({
               style={styles.dangerButton}
               onPress={() => supabase.auth.signOut()}
             >
-              <Ionicons name="log-out-outline" size={18} color={colors.error} />
-              <Text style={styles.dangerButtonText}>Sign Out</Text>
-            </TouchableOpacity>
-          </View>
+          <Ionicons name="log-out-outline" size={18} color={colors.error} />
+          <Text style={styles.dangerButtonText}>Sign Out</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.exportButton}
+          onPress={exportUserData}
+        >
+          <Ionicons name="cloud-download-outline" size={18} color={colors.accent} />
+          <Text style={styles.exportButtonText}>Export my data</Text>
+        </TouchableOpacity>
+      </View>
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -263,6 +320,26 @@ const createStyles = (colors: any) =>
       fontWeight: "600" as const,
       color: colors.error,
       marginLeft: spacing.sm,
+    },
+    exportButton: {
+      marginTop: spacing.sm,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-start",
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: colors.accent,
+      backgroundColor: colors.surface,
+      minHeight: 48,
+      gap: spacing.sm,
+    },
+    exportButtonText: {
+      fontFamily: typography.body.fontFamily,
+      fontSize: 15,
+      fontWeight: "600" as const,
+      color: colors.accent,
     },
   });
 

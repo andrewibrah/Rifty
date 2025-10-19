@@ -30,6 +30,9 @@ interface MenuListProps {
   onSelectEntry: (entryId: string) => void;
   onEntriesUpdate: (entries: RemoteJournalEntry[]) => void;
   onShowHistory?: () => void;
+  onSelectMoments?: () => void;
+  onSelectGoalsDashboard?: () => void;
+  onSelectReview?: () => void;
 }
 
 const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
@@ -61,6 +64,9 @@ const MenuList: React.FC<MenuListProps> = ({
   onSelectEntry,
   onEntriesUpdate,
   onShowHistory,
+  onSelectMoments,
+  onSelectGoalsDashboard,
+  onSelectReview,
 }) => {
   const { themeMode } = useTheme();
   const colors = getColors(themeMode);
@@ -211,6 +217,56 @@ const MenuList: React.FC<MenuListProps> = ({
           renderCategoryItem
         )}
         <TouchableOpacity
+          style={[styles.categoryButton, styles.dashboardButton]}
+          onPress={onSelectGoalsDashboard ?? (() => undefined)}
+        >
+          <View style={styles.categoryIconContainer}>
+            <Ionicons name="flag-outline" size={18} color={colors.accent} />
+          </View>
+          <View style={styles.categoryTextContainer}>
+            <Text style={styles.categoryButtonText}>Goals Dashboard</Text>
+            <Text style={styles.categoryCountText}>
+              Track milestones and progress
+            </Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.categoryButton, styles.momentsButton]}
+          onPress={onSelectMoments ?? (() => undefined)}
+        >
+          <View style={styles.categoryIconContainer}>
+            <Ionicons
+              name="sparkles-outline"
+              size={18}
+              color={colors.accent}
+            />
+          </View>
+          <View style={styles.categoryTextContainer}>
+            <Text style={styles.categoryButtonText}>Atomic Moments</Text>
+            <Text style={styles.categoryCountText}>
+              Browse saved breakthroughs
+            </Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.categoryButton, styles.reviewButton]}
+          onPress={onSelectReview ?? (() => undefined)}
+        >
+          <View style={styles.categoryIconContainer}>
+            <Ionicons
+              name="trending-up-outline"
+              size={18}
+              color={colors.accent}
+            />
+          </View>
+          <View style={styles.categoryTextContainer}>
+            <Text style={styles.categoryButtonText}>Weekly Review</Text>
+            <Text style={styles.categoryCountText}>
+              Highlights, patterns, next steps
+            </Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity
           style={[styles.categoryButton, styles.historyButton]}
           onPress={onShowHistory ?? (() => undefined)}
         >
@@ -301,6 +357,12 @@ const createStyles = (colors: any) =>
       borderRadius: radii.md,
       borderLeftWidth: 2,
       borderLeftColor: "transparent",
+    },
+    dashboardButton: {
+      borderLeftColor: colors.accent,
+    },
+    reviewButton: {
+      borderLeftColor: colors.accent,
     },
     historyButton: {
       marginTop: spacing.lg,

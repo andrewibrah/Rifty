@@ -43,6 +43,8 @@ export interface UserSettings {
   drift_rule: DriftRule;
   crisis_card?: string | null;
   persona_tag: PersonaTag;
+  checkin_notifications?: boolean;
+  missed_day_notifications?: boolean;
   updated_at?: string;
   created_at?: string;
 }
@@ -64,6 +66,9 @@ export interface ProfileSnapshot {
   timezone: string;
   onboarding_completed: boolean;
   updated_at: string | null;
+  missed_day_count?: number;
+  current_streak?: number;
+  last_message_at?: string | null;
 }
 
 export interface PersonaSignalPayload {

@@ -26,18 +26,30 @@ const WEEKLY_PROMPT = `Weekly reflection:
 - Progress on goals?
 - Focus for next week?`
 
+function pickRandomPrompt(prompts: readonly string[]): string {
+  if (prompts.length === 0) {
+    throw new Error('No prompts configured for the requested check-in type.')
+  }
+
+  const idx = Math.floor(Math.random() * prompts.length)
+  const fallback = prompts[0]!
+  return prompts[idx] ?? fallback
+}
+
 /**
  * Get a random prompt for a check-in type
  */
 function getPromptForType(type: CheckInType): string {
   switch (type) {
     case 'daily_morning':
-      return MORNING_PROMPTS[Math.floor(Math.random() * MORNING_PROMPTS.length)]
+      return pickRandomPrompt(MORNING_PROMPTS)
     case 'daily_evening':
-      return EVENING_PROMPTS[Math.floor(Math.random() * EVENING_PROMPTS.length)]
+      return pickRandomPrompt(EVENING_PROMPTS)
     case 'weekly':
       return WEEKLY_PROMPT
   }
+  // Fallback to a safe default to satisfy the return type.
+  return WEEKLY_PROMPT
 }
 
 /**
@@ -117,6 +129,24 @@ export async function getPendingCheckIn(
   const { data, error } = await query.maybeSingle()
 
   if (error) {
+    // If the database doesn't have the `check_ins` table (migrations not applied),
+    // PostgREST returns a PGRST205 error. During development we prefer to log a
+    // friendly warning and return `null` (no pending check-in) instead of crashing
+    // the whole app. This makes the app more resilient when running against a
+    // local or empty Supabase instance.
+    const errAny = error as any
+    const isMissingTable =
+      typeof errAny?.code === 'string' &&
+      (errAny.code === 'PGRST205' || /could not find the table .*check_ins/i.test(errAny.message ?? ''))
+
+    if (isMissingTable) {
+      console.warn(
+        '[getPendingCheckIn] Supabase table not found: check_ins. Returning null. '
+          + 'This usually means migrations have not been applied to the connected database.'
+      )
+      return null
+    }
+
     console.error('[getPendingCheckIn] Error:', error)
     throw error
   }

@@ -154,11 +154,16 @@ const ChatHistoryModal: React.FC<HistoryModalProps> = ({
                     {new Date(record.timestamp).toLocaleString()}
                   </Text>
                   <Text style={styles.conversationMeta}>
-                    {record.messages.length} messages
+                    {(record.messageCount ?? record.messages.length)} messages
                   </Text>
                 </View>
+                {record.title ? (
+                  <Text style={styles.conversationTitle} numberOfLines={1}>
+                    {record.title}
+                  </Text>
+                ) : null}
                 <Text style={styles.conversationPreview} numberOfLines={2}>
-                  {record.messages[0]?.content || "No messages"}
+                  {record.summary || record.messages[0]?.content || "No messages"}
                 </Text>
               </View>
               <Ionicons
@@ -366,6 +371,13 @@ const createStyles = (colors: any) =>
       fontFamily: typography.caption.fontFamily,
       fontSize: 12,
       color: colors.textSecondary,
+    },
+    conversationTitle: {
+      fontFamily: typography.heading.fontFamily,
+      fontSize: 18,
+      color: colors.textPrimary,
+      marginBottom: spacing.xs,
+      letterSpacing: typography.heading.letterSpacing,
     },
     conversationPreview: {
       fontFamily: typography.body.fontFamily,

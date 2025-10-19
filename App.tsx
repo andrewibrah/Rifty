@@ -66,9 +66,25 @@ import {
   getIntentById,
   type AppIntent,
 } from "./src/constants/intents";
-import { MAIN_HISTORY_STORAGE_KEY } from "./src/constants/storage";
+import {
+  CURRENT_SESSION_STORAGE_KEY,
+  MAIN_HISTORY_STORAGE_KEY,
+  SESSION_STATS_STORAGE_KEY,
+} from "./src/constants/storage";
 import { logIntentAudit } from "./src/services/data";
 import { Memory } from "./src/agent/memory";
+import { createChatSession, updateChatSession } from "./src/services/chatSessions";
+import { updateProfileStats } from "./src/services/profile";
+import { generateSessionMetadata } from "./src/services/sessionMetadata";
+import {
+  formatDateKey,
+  getDayNumber,
+  getMinutesSinceMidnight,
+} from "./src/utils/timezone";
+import { generateUUID } from "./src/utils/id";
+import CheckInBanner from "./src/components/CheckInBanner";
+import { getPendingCheckIn, completeCheckIn } from "./src/services/checkIns";
+import type { CheckIn } from "./src/types/mvp";
 
 const SPLASH_DURATION = 2500;
 const MIGRATION_FLAG =
@@ -78,6 +94,21 @@ const MIGRATION_FLAG =
   )
     .toLowerCase()
     .trim() === "true";
+
+const SESSION_ROTATION_CHECK_INTERVAL = 45 * 1000;
+
+interface StoredSession {
+  id: string;
+  startedAt: string;
+  lastMessageAt?: string;
+  messageCount: number;
+}
+
+interface SessionStats {
+  missedDayCount: number;
+  currentStreak: number;
+  lastMessageAt?: string | null;
+}
 
 interface ChatScreenProps {
   session: Session;
@@ -109,7 +140,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     retryMessage,
     clearMessages,
     updateMessageIntent,
-  } = useChatState(menuState.refreshAllEntryCounts);
+  } = useChatState(menuState.refreshAllEntryCounts, {
+    onBotMessage: () => {
+      handleBotActivity().catch((error) => {
+        console.warn("[ChatSession] bot activity tracking failed", error);
+      });
+    },
+  });
 
   const [content, setContent] = useState("");
   const [showMenu, setShowMenu] = useState(false);
@@ -124,6 +161,289 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   const [activeIntentReview, setActiveIntentReview] =
     useState<IntentReviewTicket | null>(null);
   const [showPersonalization, setShowPersonalization] = useState(false);
+  const [pendingCheckIn, setPendingCheckIn] = useState<CheckIn | null>(null);
+  const [activeCheckInId, setActiveCheckInId] = useState<string | null>(null);
+  const [sessionInfo, setSessionInfo] = useState<StoredSession | null>(null);
+  const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
+  const timezoneRef = useRef<string>("UTC");
+  const sessionInfoRef = useRef<StoredSession | null>(null);
+  const sessionStatsRef = useRef<SessionStats | null>(null);
+  const rotationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  );
+
+  useEffect(() => {
+    sessionInfoRef.current = sessionInfo;
+  }, [sessionInfo]);
+
+  useEffect(() => {
+    sessionStatsRef.current = sessionStats;
+  }, [sessionStats]);
+
+  const loadPendingCheckIn = useCallback(async () => {
+    if (personalization?.settings?.checkin_notifications === false) {
+      setPendingCheckIn(null);
+      return;
+    }
+    try {
+      const pending = await getPendingCheckIn();
+      setPendingCheckIn(pending ?? null);
+    } catch (error) {
+      console.warn("[CheckIn] load failed", error);
+    }
+  }, [personalization?.settings?.checkin_notifications]);
+
+  const loadSessionFromStorage = useCallback(async (): Promise<StoredSession | null> => {
+    try {
+      const raw = await AsyncStorage.getItem(CURRENT_SESSION_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as StoredSession;
+      if (parsed && parsed.id && parsed.startedAt) {
+        return {
+          id: parsed.id,
+          startedAt: parsed.startedAt,
+          lastMessageAt: parsed.lastMessageAt,
+          messageCount: Number(parsed.messageCount ?? 0),
+        };
+      }
+    } catch (error) {
+      console.warn("[ChatSession] failed to load session", error);
+    }
+    return null;
+  }, []);
+
+  const saveSessionToStorage = useCallback(async (session: StoredSession | null) => {
+    try {
+      if (!session) {
+        await AsyncStorage.removeItem(CURRENT_SESSION_STORAGE_KEY);
+        return;
+      }
+      await AsyncStorage.setItem(
+        CURRENT_SESSION_STORAGE_KEY,
+        JSON.stringify(session)
+      );
+    } catch (error) {
+      console.warn("[ChatSession] failed to persist session", error);
+    }
+  }, []);
+
+  const loadStatsFromStorage = useCallback(async (): Promise<SessionStats | null> => {
+    try {
+      const raw = await AsyncStorage.getItem(SESSION_STATS_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as SessionStats;
+      if (parsed) {
+        return {
+          missedDayCount: Number(parsed.missedDayCount ?? 0),
+          currentStreak: Number(parsed.currentStreak ?? 0),
+          lastMessageAt: parsed.lastMessageAt ?? null,
+        };
+      }
+    } catch (error) {
+      console.warn("[ChatSession] failed to load stats", error);
+    }
+    return null;
+  }, []);
+
+  const saveStatsToStorage = useCallback(async (stats: SessionStats | null) => {
+    try {
+      if (!stats) {
+        await AsyncStorage.removeItem(SESSION_STATS_STORAGE_KEY);
+        return;
+      }
+      await AsyncStorage.setItem(SESSION_STATS_STORAGE_KEY, JSON.stringify(stats));
+    } catch (error) {
+      console.warn("[ChatSession] failed to persist stats", error);
+    }
+  }, []);
+
+  const shouldRotateSession = useCallback(
+    (session: StoredSession, now: Date, timezone: string) => {
+      const sessionDay = getDayNumber(new Date(session.startedAt), timezone);
+      const nowDay = getDayNumber(now, timezone);
+      if (nowDay - sessionDay > 1) {
+        return true;
+      }
+      if (nowDay > sessionDay) {
+        const minutes = getMinutesSinceMidnight(now, timezone);
+        if (minutes >= 120) {
+          return true;
+        }
+      }
+      if (session.lastMessageAt) {
+        const lastActivityDay = getDayNumber(
+          new Date(session.lastMessageAt),
+          timezone
+        );
+        if (nowDay - lastActivityDay > 1) {
+          return true;
+        }
+        if (nowDay > lastActivityDay) {
+          const minutes = getMinutesSinceMidnight(now, timezone);
+          if (minutes >= 120) {
+            return true;
+          }
+        }
+      }
+      return false;
+    },
+    []
+  );
+
+  const startNewSession = useCallback(
+    async (timezone: string): Promise<StoredSession> => {
+      const now = new Date();
+      const session: StoredSession = {
+        id: generateUUID(),
+        startedAt: now.toISOString(),
+        messageCount: 0,
+      };
+      try {
+        await createChatSession({
+          id: session.id,
+          sessionDate: formatDateKey(now, timezone),
+          startedAt: session.startedAt,
+          messageCount: 0,
+        });
+      } catch (error) {
+        console.warn("[ChatSession] failed to create", error);
+      }
+      sessionInfoRef.current = session;
+      setSessionInfo(session);
+      await saveSessionToStorage(session);
+      return session;
+    },
+    [saveSessionToStorage]
+  );
+
+  const incrementSessionMessageCount = useCallback(
+    async (delta: number, lastMessageIso?: string) => {
+      const timezone = timezoneRef.current;
+      let session = sessionInfoRef.current;
+      if (!session) {
+        session = await loadSessionFromStorage();
+        if (session) {
+          sessionInfoRef.current = session;
+          setSessionInfo(session);
+        }
+      }
+      if (!session) {
+        session = await startNewSession(timezone);
+      }
+      const updated: StoredSession = {
+        ...session,
+        messageCount: Math.max(0, (session.messageCount ?? 0) + delta),
+        lastMessageAt: lastMessageIso ?? session.lastMessageAt,
+      };
+      sessionInfoRef.current = updated;
+      setSessionInfo(updated);
+      await saveSessionToStorage(updated);
+      try {
+        await updateChatSession(updated.id, {
+          messageCount: updated.messageCount,
+        });
+      } catch (error) {
+        console.warn("[ChatSession] failed to sync count", error);
+      }
+    },
+    [loadSessionFromStorage, saveSessionToStorage, startNewSession]
+  );
+
+  const handleBotActivity = useCallback(async () => {
+    await incrementSessionMessageCount(1);
+  }, [incrementSessionMessageCount]);
+
+  const handleUserActivity = useCallback(
+    async (sentAt: Date) => {
+      await incrementSessionMessageCount(1, sentAt.toISOString());
+
+      const timezone = timezoneRef.current;
+      const stats = sessionStatsRef.current ?? {
+        missedDayCount:
+          personalization?.profile.missed_day_count !== undefined
+            ? personalization.profile.missed_day_count
+            : 0,
+        currentStreak:
+          personalization?.profile.current_streak !== undefined
+            ? personalization.profile.current_streak
+            : 0,
+        lastMessageAt: personalization?.profile.last_message_at ?? null,
+      };
+
+      let nextMissed = stats.missedDayCount ?? 0;
+      let nextStreak = stats.currentStreak ?? 0;
+
+      if (stats.lastMessageAt) {
+        const lastDay = getDayNumber(new Date(stats.lastMessageAt), timezone);
+        const currentDay = getDayNumber(sentAt, timezone);
+        const diff = currentDay - lastDay;
+        if (diff === 0) {
+          if (nextStreak <= 0) {
+            nextStreak = 1;
+          }
+        } else if (diff === 1) {
+          nextStreak = Math.max(1, nextStreak + 1);
+        } else if (diff > 1) {
+          nextMissed += diff - 1;
+          nextStreak = 1;
+        }
+      } else {
+        nextStreak = Math.max(1, nextStreak + 1);
+      }
+
+      const nextStats: SessionStats = {
+        missedDayCount: nextMissed,
+        currentStreak: nextStreak,
+        lastMessageAt: sentAt.toISOString(),
+      };
+      sessionStatsRef.current = nextStats;
+      setSessionStats(nextStats);
+      await saveStatsToStorage(nextStats);
+
+      try {
+        await updateProfileStats({
+          missed_day_count: nextMissed,
+          current_streak: nextStreak,
+          last_message_at: sentAt.toISOString(),
+        });
+      } catch (error) {
+        console.warn("[Profile] failed to update stats", error);
+      }
+    },
+    [incrementSessionMessageCount, personalization, saveStatsToStorage]
+  );
+
+  const maybeRotateSession = useCallback(
+    async (timezone: string, forcedNow?: Date) => {
+      const session = sessionInfoRef.current;
+      if (!session) return;
+      const now = forcedNow ?? new Date();
+      if (!shouldRotateSession(session, now, timezone)) {
+        return;
+      }
+
+      const hasMessages = messages.length > 0 || session.messageCount > 0;
+
+      if (hasMessages) {
+        await archiveConversation({ reason: "auto", endedAt: now });
+        clearMessages();
+      } else {
+        sessionInfoRef.current = null;
+        setSessionInfo(null);
+        await saveSessionToStorage(null);
+      }
+
+      await startNewSession(timezone);
+    },
+    [
+      archiveConversation,
+      clearMessages,
+      messages.length,
+      saveSessionToStorage,
+      shouldRotateSession,
+      startNewSession,
+    ]
+  );
 
   const splashOpacity = useRef(new Animated.Value(1)).current;
   const flameTranslate = useRef(new Animated.Value(0)).current;
@@ -179,6 +499,69 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   }, [flameScale, flameTranslate, splashOpacity]);
 
   useEffect(() => {
+    if (!personalization) return;
+
+    const timezone = personalization.profile.timezone || "UTC";
+    timezoneRef.current = timezone;
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      const storedStats = await loadStatsFromStorage();
+      if (!cancelled) {
+        if (storedStats) {
+          sessionStatsRef.current = storedStats;
+          setSessionStats(storedStats);
+        } else {
+          const fallbackStats: SessionStats = {
+            missedDayCount: personalization.profile.missed_day_count ?? 0,
+            currentStreak: personalization.profile.current_streak ?? 0,
+            lastMessageAt: personalization.profile.last_message_at ?? null,
+          };
+          sessionStatsRef.current = fallbackStats;
+          setSessionStats(fallbackStats);
+          await saveStatsToStorage(fallbackStats);
+        }
+      }
+
+      let session = await loadSessionFromStorage();
+      if (cancelled) return;
+
+      if (session) {
+        sessionInfoRef.current = session;
+        setSessionInfo(session);
+        await maybeRotateSession(timezone);
+      } else {
+        await startNewSession(timezone);
+      }
+    };
+
+    bootstrap();
+
+    if (rotationIntervalRef.current) {
+      clearInterval(rotationIntervalRef.current);
+    }
+
+    rotationIntervalRef.current = setInterval(() => {
+      maybeRotateSession(timezoneRef.current);
+    }, SESSION_ROTATION_CHECK_INTERVAL);
+
+    return () => {
+      cancelled = true;
+      if (rotationIntervalRef.current) {
+        clearInterval(rotationIntervalRef.current);
+        rotationIntervalRef.current = null;
+      }
+    };
+  }, [
+    personalization,
+    loadStatsFromStorage,
+    saveStatsToStorage,
+    loadSessionFromStorage,
+    maybeRotateSession,
+    startNewSession,
+  ]);
+
+  useEffect(() => {
     if (activeIntentReview) return;
     const [nextReview, ...rest] = intentReviewQueue;
     if (!nextReview) return;
@@ -192,14 +575,45 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     });
   }, []);
 
+  useEffect(() => {
+    loadPendingCheckIn();
+  }, [loadPendingCheckIn]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        maybeRotateSession(timezoneRef.current);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [maybeRotateSession]);
+
   const handleSend = async () => {
     try {
       const trimmed = content.trim();
       if (!trimmed) return;
+      const timezone = timezoneRef.current;
+      await maybeRotateSession(timezone);
+
+      const sentAt = new Date();
+      await handleUserActivity(sentAt);
+
       const review = await sendMessage(trimmed);
       setContent("");
       if (review) {
         setIntentReviewQueue((prev) => [...prev, review]);
+      }
+      if (activeCheckInId) {
+        try {
+          await completeCheckIn(activeCheckInId, { response: trimmed });
+        } catch (checkInError) {
+          console.warn("[CheckIn] completion failed", checkInError);
+        }
+        setActiveCheckInId(null);
+        loadPendingCheckIn();
       }
 
       requestAnimationFrame(() => {
@@ -241,31 +655,99 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   const [isGestureActive, setIsGestureActive] = useState(false);
   const [gestureProgress, setGestureProgress] = useState(0);
 
-  const archiveConversation = useCallback(async () => {
-    if (messages.length === 0) {
-      return;
-    }
+  const archiveConversation = useCallback(
+    async (options?: { reason?: "manual" | "auto"; endedAt?: Date }) => {
+      const currentSession = sessionInfoRef.current;
+      const endedAt = options?.endedAt ?? new Date();
+      const timezone = timezoneRef.current;
+      const snapshot: ChatMessage[] = JSON.parse(JSON.stringify(messages));
+      const messageCount = currentSession?.messageCount ?? snapshot.length;
 
-    const snapshot: ChatMessage[] = JSON.parse(JSON.stringify(messages));
+      if (messageCount === 0) {
+        sessionInfoRef.current = null;
+        setSessionInfo(null);
+        await saveSessionToStorage(null);
+        return null;
+      }
 
-    const record: MainHistoryRecord = {
-      id: `${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      messages: snapshot,
-    };
+      let metadata = await generateSessionMetadata(snapshot).catch(() => {
+        const fallbackSource = snapshot.find((msg) => msg.kind !== "bot") ??
+          snapshot[0];
+        const title = fallbackSource?.content
+          ? fallbackSource.content.slice(0, 40)
+          : "Reflection";
+        return {
+          title,
+          summary: "Conversation summary unavailable.",
+          confidence: 0.2,
+        };
+      });
 
-    try {
-      const raw = await AsyncStorage.getItem(MAIN_HISTORY_STORAGE_KEY);
-      const history: MainHistoryRecord[] = raw ? JSON.parse(raw) : [];
-      const next = [record, ...history].slice(0, 20);
-      await AsyncStorage.setItem(
-        MAIN_HISTORY_STORAGE_KEY,
-        JSON.stringify(next)
-      );
-    } catch (error) {
-      console.error("Failed to archive conversation", error);
-    }
-  }, [messages]);
+      if (!metadata.title || metadata.title.trim().length === 0) {
+        metadata = {
+          ...metadata,
+          title: "Reflection",
+        };
+      }
+
+      const record: MainHistoryRecord = {
+        id: currentSession?.id ?? generateUUID(),
+        timestamp: endedAt.toISOString(),
+        title: metadata.title,
+        summary: metadata.summary,
+        aiTitleConfidence: metadata.confidence,
+        messageCount,
+        messages: snapshot,
+      };
+
+      try {
+        const raw = await AsyncStorage.getItem(MAIN_HISTORY_STORAGE_KEY);
+        const history: MainHistoryRecord[] = raw ? JSON.parse(raw) : [];
+        const next = [record, ...history].slice(0, 50);
+        await AsyncStorage.setItem(
+          MAIN_HISTORY_STORAGE_KEY,
+          JSON.stringify(next)
+        );
+      } catch (error) {
+        console.error("Failed to archive conversation", error);
+      }
+
+      if (currentSession) {
+        try {
+          await updateChatSession(currentSession.id, {
+            endedAt: endedAt.toISOString(),
+            title: metadata.title,
+            summary: metadata.summary,
+            messageCount,
+            aiTitleConfidence: metadata.confidence,
+          });
+        } catch (error) {
+          console.warn("[ChatSession] finalize failed", error);
+        }
+      } else {
+        try {
+          await createChatSession({
+            id: record.id,
+            sessionDate: formatDateKey(endedAt, timezone),
+            startedAt: endedAt.toISOString(),
+            title: metadata.title,
+            summary: metadata.summary,
+            messageCount,
+            aiTitleConfidence: metadata.confidence,
+          });
+        } catch (error) {
+          console.warn("[ChatSession] backfill create failed", error);
+        }
+      }
+
+      sessionInfoRef.current = null;
+      setSessionInfo(null);
+      await saveSessionToStorage(null);
+
+      return record;
+    },
+    [messages, saveSessionToStorage]
+  );
 
   // Handle clear chat with confirmation
   const handleClearChat = useCallback(() => {
@@ -280,13 +762,18 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         {
           text: "Clear",
           style: "destructive",
-          onPress: () => {
-            archiveConversation().finally(() => clearMessages());
+          onPress: async () => {
+            try {
+              await archiveConversation({ reason: "manual" });
+            } finally {
+              clearMessages();
+              await startNewSession(timezoneRef.current);
+            }
           },
         },
       ]
     );
-  }, [archiveConversation, clearMessages]);
+  }, [archiveConversation, clearMessages, startNewSession]);
 
   const handleIntentConfirm = useCallback(
     (messageId: string, correctIntent: string, displayLabel?: string) => {
@@ -467,6 +954,17 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     setShowPersonalization(false);
   }, []);
 
+  const handleRespondCheckIn = useCallback(() => {
+    if (!pendingCheckIn) return;
+    setActiveCheckInId(pendingCheckIn.id);
+    setContent(`${pendingCheckIn.prompt} `);
+    setPendingCheckIn(null);
+  }, [pendingCheckIn]);
+
+  const handleDismissCheckIn = useCallback(() => {
+    setPendingCheckIn(null);
+  }, []);
+
   if (currentScreen === "settings") {
     return (
       <SettingsScreen
@@ -516,6 +1014,29 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             />
 
             <View style={styles.messageContainer}>
+              {pendingCheckIn &&
+                personalization?.settings?.checkin_notifications !== false && (
+                  <CheckInBanner
+                    type={pendingCheckIn.type}
+                    prompt={pendingCheckIn.prompt}
+                    onRespond={handleRespondCheckIn}
+                    onDismiss={handleDismissCheckIn}
+                  />
+                )}
+              {sessionStats?.missedDayCount &&
+              sessionStats.missedDayCount > 0 &&
+              personalization?.settings?.missed_day_notifications !== false ? (
+                <View style={styles.missedDayAlert}>
+                  <Ionicons
+                    name="flame-outline"
+                    size={16}
+                    color={colors.accent}
+                  />
+                  <Text style={styles.missedDayText}>
+                    {`You’ve missed ${sessionStats.missedDayCount} day${sessionStats.missedDayCount === 1 ? "" : "s"}. Let’s pick up where we left off.`}
+                  </Text>
+                </View>
+              ) : null}
               {/* Background Logo */}
               <View style={styles.backgroundLogoContainer}>
                 <Image
@@ -650,6 +1171,24 @@ const createStyles = (colors: any) =>
     messageContainer: {
       flex: 1,
       position: "relative",
+    },
+    missedDayAlert: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      marginHorizontal: spacing.md,
+      marginTop: spacing.sm,
+      padding: spacing.sm,
+      borderRadius: radii.md,
+      backgroundColor: `${colors.accent}12`,
+      borderWidth: 1,
+      borderColor: `${colors.accent}40`,
+    },
+    missedDayText: {
+      fontFamily: typography.caption.fontFamily,
+      fontSize: 12,
+      color: colors.textSecondary,
+      flex: 1,
     },
     backgroundLogoContainer: {
       position: "absolute",

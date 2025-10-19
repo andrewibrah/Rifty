@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Alert,
   Share,
   ScrollView,
+  Switch,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -21,6 +22,7 @@ import OnboardingFlow from "../onboarding/OnboardingFlow";
 import {
   exportPersonalization,
   deletePersonalization,
+  updateNotificationPreferences,
 } from "../../services/personalization";
 
 interface PersonalizationSettingsScreenProps {
@@ -39,6 +41,17 @@ const PersonalizationSettingsScreen: React.FC<
   const colors = getColors(themeMode);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [isEditing, setIsEditing] = useState(false);
+  const [checkinEnabled, setCheckinEnabled] = useState(
+    settings?.checkin_notifications ?? true
+  );
+  const [missedDayEnabled, setMissedDayEnabled] = useState(
+    settings?.missed_day_notifications ?? true
+  );
+
+  useEffect(() => {
+    setCheckinEnabled(settings?.checkin_notifications ?? true);
+    setMissedDayEnabled(settings?.missed_day_notifications ?? true);
+  }, [settings?.checkin_notifications, settings?.missed_day_notifications]);
 
   if (isEditing) {
     return (
@@ -139,6 +152,58 @@ const PersonalizationSettingsScreen: React.FC<
           <Text
             style={styles.item}
           >{`Logging: ${settings?.logging_format ?? "-"}`}</Text>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Notifications</Text>
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleCopy}>
+              <Text style={styles.toggleLabel}>Check-in reminders</Text>
+              <Text style={styles.toggleHint}>
+                Morning and evening prompts to reflect
+              </Text>
+            </View>
+            <Switch
+              value={checkinEnabled}
+              onValueChange={async (value) => {
+                setCheckinEnabled(value);
+                try {
+                  await updateNotificationPreferences({
+                    checkin_notifications: value,
+                  });
+                } catch (error) {
+                  Alert.alert(
+                    "Update failed",
+                    "Unable to update notification preference."
+                  );
+                }
+              }}
+            />
+          </View>
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleCopy}>
+              <Text style={styles.toggleLabel}>Missed day alerts</Text>
+              <Text style={styles.toggleHint}>
+                Gentle nudge when a day slips by without journaling
+              </Text>
+            </View>
+            <Switch
+              value={missedDayEnabled}
+              onValueChange={async (value) => {
+                setMissedDayEnabled(value);
+                try {
+                  await updateNotificationPreferences({
+                    missed_day_notifications: value,
+                  });
+                } catch (error) {
+                  Alert.alert(
+                    "Update failed",
+                    "Unable to update notification preference."
+                  );
+                }
+              }}
+            />
+          </View>
         </View>
 
         <View style={styles.card}>

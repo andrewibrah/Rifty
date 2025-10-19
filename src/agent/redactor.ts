@@ -2,29 +2,30 @@ import type { RedactionResult } from './types';
 
 interface PatternConfig {
   name: string;
-  regex: RegExp;
+  createRegex: () => RegExp;
   mask: (index: number) => string;
 }
 
 const PATTERNS: PatternConfig[] = [
   {
     name: 'email',
-    regex: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
+    createRegex: () => /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
     mask: (i) => `[EMAIL_${i}]`,
   },
   {
     name: 'phone',
-    regex: /(?:\+?\d{1,3}[\s-]?)?(?:\(\d{2,3}\)|\d{2,3})[\s-]?\d{3}[\s-]?\d{4}/g,
+    createRegex: () => /(?:\+?\d{1,3}[\s-]?)?(?:\(\d{2,3}\)|\d{2,3})[\s-]?\d{3}[\s-]?\d{4}/g,
     mask: (i) => `[PHONE_${i}]`,
   },
   {
     name: 'card',
-    regex: /\b(?:\d[ -]*?){13,16}\b/g,
+    createRegex: () => /\b(?:\d[ -]*?){13,16}\b/g,
     mask: (i) => `[CARD_${i}]`,
   },
   {
     name: 'address',
-    regex: /\b\d{1,5}\s+[^\n,]+(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?|Lane|Ln\.?|Drive|Dr\.?|Court|Ct\.?|Place|Pl\.?)\b/gi,
+    createRegex: () =>
+      /\b\d{1,5}\s+[^\n,]+(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?|Lane|Ln\.?|Drive|Dr\.?|Court|Ct\.?|Place|Pl\.?)\b/gi,
     mask: (i) => `[ADDR_${i}]`,
   },
 ];
@@ -40,7 +41,7 @@ export const Redactor = {
 
     PATTERNS.forEach((pattern) => {
       let index = 0;
-      const regex = new RegExp(pattern.regex.source, pattern.regex.flags);
+      const regex = pattern.createRegex();
       masked = masked.replace(regex, (match) => {
         const key = pattern.mask(index);
         replacementMap[key] = match;

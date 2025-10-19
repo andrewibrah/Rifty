@@ -19,6 +19,9 @@ import { useMenuState } from "../../hooks/useMenuState";
 import { useEntryChat } from "../../hooks/useEntryChat";
 import MenuList from "../menu/MenuList";
 import MenuEntryChat from "../menu/MenuEntryChat";
+import AtomicMomentsPanel from "../menu/AtomicMomentsPanel";
+import GoalsPanel from "../menu/GoalsPanel";
+import ReviewPanel from "../menu/ReviewPanel";
 import SettingsModal from "./SettingsModal";
 import HistoryModal from "./ChatHistoryModal";
 import { getColors, spacing, typography, radii } from "../../theme";
@@ -56,6 +59,9 @@ const MenuModal: React.FC<MenuModalProps> = ({
   const [showContent, setShowContent] = useState(false);
   const slideAnim = useRef(new Animated.Value(-300)).current;
   const [historyVisible, setHistoryVisible] = useState(false);
+  const [showMoments, setShowMoments] = useState(false);
+  const [showGoalsDashboard, setShowGoalsDashboard] = useState(false);
+  const [showReviewPanel, setShowReviewPanel] = useState(false);
 
   // Use passed menu state or create new one
   const menuState = passedMenuState || useMenuState();
@@ -95,6 +101,9 @@ const MenuModal: React.FC<MenuModalProps> = ({
   React.useEffect(() => {
     if (!visible) {
       setHistoryVisible(false);
+      setShowMoments(false);
+      setShowGoalsDashboard(false);
+      setShowReviewPanel(false);
     }
   }, [visible]);
 
@@ -171,7 +180,7 @@ const MenuModal: React.FC<MenuModalProps> = ({
       onRequestClose={onClose}
     >
       <SafeAreaProvider>
-        {showEntryChat ? (
+        {showEntryChat || showMoments || showGoalsDashboard || showReviewPanel ? (
           // Full screen entry chat
           <View style={styles.fullScreenContainer}>
             <SafeAreaView
@@ -180,7 +189,21 @@ const MenuModal: React.FC<MenuModalProps> = ({
             >
               <View style={styles.fullScreenHeader}>
                 <TouchableOpacity
-                  onPress={menuState.handleBack}
+                  onPress={() => {
+                    if (showMoments) {
+                      setShowMoments(false);
+                      return;
+                    }
+                    if (showGoalsDashboard) {
+                      setShowGoalsDashboard(false);
+                      return;
+                    }
+                    if (showReviewPanel) {
+                      setShowReviewPanel(false);
+                      return;
+                    }
+                    menuState.handleBack();
+                  }}
                   style={styles.backButton}
                 >
                   <Ionicons
@@ -190,16 +213,24 @@ const MenuModal: React.FC<MenuModalProps> = ({
                   />
                 </TouchableOpacity>
                 <Text style={styles.modalTitle}>
-                  {entryChat.selectedEntry
-                    ? currentChatMode === "note"
-                      ? "Notes"
-                      : "AI Chat"
-                    : null}
+                  {showMoments
+                    ? "Atomic Moments"
+                    : showGoalsDashboard
+                      ? "Goals Dashboard"
+                      : showReviewPanel
+                        ? "Weekly Review"
+                        : entryChat.selectedEntry
+                          ? currentChatMode === "note"
+                            ? "Notes"
+                            : "AI Chat"
+                          : null}
                 </Text>
-                {entryChat.selectedEntry &&
-                currentChatMode === "ai" &&
-                entryChat.annotations.filter((a) => a.channel === "ai").length >
-                  0 ? (
+                {showMoments || showGoalsDashboard || showReviewPanel ? (
+                  <View style={styles.headerSpacer} />
+                ) : entryChat.selectedEntry &&
+                  currentChatMode === "ai" &&
+                  entryChat.annotations.filter((a) => a.channel === "ai").length >
+                    0 ? (
                   <TouchableOpacity
                     onPress={handleClearAIChat}
                     style={styles.clearButton}
@@ -216,12 +247,39 @@ const MenuModal: React.FC<MenuModalProps> = ({
                   <View style={styles.headerSpacer} />
                 )}
               </View>
-              {entryChat.selectedEntry && (
+              {showMoments ? (
+                <AtomicMomentsPanel onClose={() => setShowMoments(false)} />
+              ) : showGoalsDashboard ? (
+                <GoalsPanel onClose={() => setShowGoalsDashboard(false)} />
+              ) : showReviewPanel ? (
+                <ReviewPanel
+                  onClose={() => setShowReviewPanel(false)}
+                  onOpenGoals={() => {
+                    setShowReviewPanel(false);
+                    setShowGoalsDashboard(true);
+                  }}
+                  onOpenJournals={() => {
+                    setShowReviewPanel(false);
+                    menuState.handleSelectType("journal");
+                  }}
+                  onOpenSchedules={() => {
+                    setShowReviewPanel(false);
+                    menuState.handleSelectType("schedule");
+                  }}
+                  onOpenMoments={() => {
+                    setShowReviewPanel(false);
+                    setShowMoments(true);
+                  }}
+                />
+              ) : entryChat.selectedEntry ? (
                 <MenuEntryChat
                   entry={entryChat.selectedEntry}
                   annotations={entryChat.annotations}
                   loading={entryChat.annotationsLoading}
                   error={entryChat.annotationsError}
+                  summary={entryChat.entrySummary}
+                  emotion={entryChat.entryEmotion}
+                  moments={entryChat.entryMoments}
                   onAnnotationsUpdate={entryChat.setAnnotations}
                   onAnnotationCountUpdate={handleAnnotationCountUpdate}
                   onErrorUpdate={entryChat.onErrorUpdate}
@@ -229,7 +287,7 @@ const MenuModal: React.FC<MenuModalProps> = ({
                   onRefreshAnnotations={entryChat.refreshAnnotations}
                   onClearAIChat={handleClearAIChat}
                 />
-              )}
+              ) : null}
             </SafeAreaView>
           </View>
         ) : (
@@ -289,11 +347,12 @@ const MenuModal: React.FC<MenuModalProps> = ({
                       onSelectType={menuState.handleSelectType}
                       onSelectEntry={menuState.handleSelectEntry}
                       onEntriesUpdate={(entries) => {
-                        // Update the entries in menu state
-                        // Entry counts will update automatically via useEffect
                         (menuState as any).setEntries(entries);
                       }}
                       onShowHistory={handleShowHistory}
+                      onSelectMoments={() => setShowMoments(true)}
+                      onSelectReview={() => setShowReviewPanel(true)}
+                      onSelectGoalsDashboard={() => setShowGoalsDashboard(true)}
                     />
                   )}
 
