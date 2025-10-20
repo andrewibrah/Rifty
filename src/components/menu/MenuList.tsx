@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -72,6 +72,12 @@ const MenuList: React.FC<MenuListProps> = ({
   const colors = getColors(themeMode);
   const styles = useMemo(() => createStyles(colors), [colors]);
 
+  // Selection state
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedEntries, setSelectedEntries] = useState<Set<string>>(
+    new Set()
+  );
+
   const handleDeleteEntry = useCallback(
     async (id: string) => {
       Alert.alert(
@@ -104,6 +110,87 @@ const MenuList: React.FC<MenuListProps> = ({
     },
     [selectedType, onEntriesUpdate]
   );
+
+  // Selection mode handlers
+  const handleLongPressEntry = useCallback(
+    (id: string) => {
+      if (!isSelectionMode) {
+        setIsSelectionMode(true);
+        setSelectedEntries(new Set([id]));
+      }
+    },
+    [isSelectionMode]
+  );
+
+  const handleToggleSelection = useCallback(
+    (id: string) => {
+      if (isSelectionMode) {
+        setSelectedEntries((prev) => {
+          const newSet = new Set(prev);
+          if (newSet.has(id)) {
+            newSet.delete(id);
+          } else {
+            newSet.add(id);
+          }
+          return newSet;
+        });
+      } else {
+        onSelectEntry(id);
+      }
+    },
+    [isSelectionMode, onSelectEntry]
+  );
+
+  const handleCancelSelection = useCallback(() => {
+    setIsSelectionMode(false);
+    setSelectedEntries(new Set());
+  }, []);
+
+  const handleDeleteSelected = useCallback(async () => {
+    if (selectedEntries.size === 0) return;
+
+    const entryCount = selectedEntries.size;
+    Alert.alert(
+      "Delete Selected Entries",
+      `Are you sure you want to delete ${entryCount} ${entryCount === 1 ? "entry" : "entries"}? This cannot be undone.`,
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // Delete all selected entries
+              await Promise.all(
+                Array.from(selectedEntries).map((id) => deleteJournalEntry(id))
+              );
+
+              // Refresh entries
+              const updatedEntries = await listJournals(
+                selectedType
+                  ? { type: selectedType, limit: 100 }
+                  : { limit: 100 }
+              );
+              onEntriesUpdate(updatedEntries);
+
+              // Exit selection mode
+              setIsSelectionMode(false);
+              setSelectedEntries(new Set());
+            } catch (error) {
+              console.error("Error deleting selected entries:", error);
+              Alert.alert(
+                "Error",
+                "Failed to delete some entries. Please try again."
+              );
+            }
+          },
+        },
+      ]
+    );
+  }, [selectedEntries, selectedType, onEntriesUpdate]);
 
   const handleClearAllEntries = useCallback(
     async (type: EntryType) => {
@@ -181,12 +268,16 @@ const MenuList: React.FC<MenuListProps> = ({
   const renderEntryItem = useCallback(
     ({ item }: { item: RemoteJournalEntry }) => {
       const updateCount = item.id ? annotationCounts[item.id] || 0 : 0;
+      const isSelected = item.id ? selectedEntries.has(item.id) : false;
 
       return (
         <TouchableOpacity
-          style={styles.historyItem}
-          onPress={() => item.id && onSelectEntry(item.id)}
-          onLongPress={() => item.id && handleDeleteEntry(item.id)}
+          style={[
+            styles.historyItem,
+            isSelectionMode && isSelected && styles.selectedItem,
+          ]}
+          onPress={() => item.id && handleToggleSelection(item.id)}
+          onLongPress={() => item.id && handleLongPressEntry(item.id)}
         >
           <View style={styles.historyItemContent}>
             <Text style={styles.historyItemText}>{item.content}</Text>
@@ -206,7 +297,15 @@ const MenuList: React.FC<MenuListProps> = ({
         </TouchableOpacity>
       );
     },
-    [annotationCounts, onSelectEntry, handleDeleteEntry, styles]
+    [
+      annotationCounts,
+      selectedEntries,
+      isSelectionMode,
+      handleToggleSelection,
+      handleLongPressEntry,
+      colors,
+      styles,
+    ]
   );
 
   if (mode === "categories") {
@@ -235,11 +334,7 @@ const MenuList: React.FC<MenuListProps> = ({
           onPress={onSelectMoments ?? (() => undefined)}
         >
           <View style={styles.categoryIconContainer}>
-            <Ionicons
-              name="sparkles-outline"
-              size={18}
-              color={colors.accent}
-            />
+            <Ionicons name="sparkles-outline" size={18} color={colors.accent} />
           </View>
           <View style={styles.categoryTextContainer}>
             <Text style={styles.categoryButtonText}>Atomic Moments</Text>
@@ -313,16 +408,49 @@ const MenuList: React.FC<MenuListProps> = ({
         entries.length > 0 &&
         selectedType && (
           <View style={styles.fixedFooter}>
-            <TouchableOpacity
-              style={styles.deleteAllButton}
-              onPress={() => handleClearAllEntries(selectedType)}
-            >
-              <Ionicons
-                name="trash-outline"
-                size={20}
-                color={colors.textSecondary}
-              />
-            </TouchableOpacity>
+            {isSelectionMode ? (
+              <View style={styles.selectionFooter}>
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={handleCancelSelection}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <Text style={styles.selectionCounter}>
+                  {selectedEntries.size} selected
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.deleteSelectedButton,
+                    selectedEntries.size === 0 &&
+                      styles.deleteSelectedButtonDisabled,
+                  ]}
+                  onPress={handleDeleteSelected}
+                  disabled={selectedEntries.size === 0}
+                >
+                  <Ionicons
+                    name="trash-outline"
+                    size={16}
+                    color={
+                      selectedEntries.size === 0
+                        ? colors.textTertiary
+                        : colors.background
+                    }
+                  />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.deleteAllButton}
+                onPress={() => handleClearAllEntries(selectedType)}
+              >
+                <Ionicons
+                  name="trash-outline"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+              </TouchableOpacity>
+            )}
           </View>
         )}
     </View>
@@ -362,6 +490,9 @@ const createStyles = (colors: any) =>
       borderLeftColor: colors.accent,
     },
     reviewButton: {
+      borderLeftColor: colors.accent,
+    },
+    momentsButton: {
       borderLeftColor: colors.accent,
     },
     historyButton: {
@@ -435,6 +566,9 @@ const createStyles = (colors: any) =>
       paddingVertical: spacing.md,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
+      marginHorizontal: spacing.xs,
+      marginVertical: spacing.xs / 2,
+      borderRadius: radii.md,
     },
     historyItemContent: {
       flex: 1,
@@ -472,6 +606,68 @@ const createStyles = (colors: any) =>
       borderWidth: 1,
       borderColor: colors.accent,
       overflow: "hidden",
+    },
+    // Selection mode styles
+    selectedItem: {
+      borderLeftWidth: 3,
+      borderLeftColor: colors.accent,
+      borderRightWidth: 3,
+      borderRightColor: colors.accent,
+      borderTopWidth: 3,
+      borderTopColor: colors.accent,
+      backgroundColor: colors.surfaceElevated,
+      borderRadius: radii.md,
+      marginHorizontal: spacing.xs,
+      marginVertical: spacing.xs / 2,
+    },
+    selectionFooter: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      width: "100%",
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    cancelButton: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+      borderRadius: radii.sm,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      flex: 0,
+    },
+    cancelButtonText: {
+      fontFamily: typography.body.fontFamily,
+      fontWeight: "500",
+      fontSize: 14,
+      color: colors.textPrimary,
+    },
+    selectionCounter: {
+      fontFamily: typography.body.fontFamily,
+      fontWeight: "500",
+      fontSize: 14,
+      color: colors.textSecondary,
+      backgroundColor: colors.surface,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      borderRadius: radii.sm,
+      flex: 0,
+      marginHorizontal: spacing.sm,
+    },
+    deleteSelectedButton: {
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+      borderRadius: radii.sm,
+      backgroundColor: colors.error,
+      flex: 0,
+      minWidth: 50,
+    },
+    deleteSelectedButtonDisabled: {
+      opacity: 0.3,
+      backgroundColor: colors.surface,
     },
   });
 

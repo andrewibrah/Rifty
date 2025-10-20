@@ -9,10 +9,17 @@ interface MessageBubbleProps {
   isPartOfGroup: boolean;
   showTimestamp: boolean;
   onRetry?: (messageId: string) => void;
+  onLongPress?: (message: ChatMessage) => void;
 }
 
 const MessageBubble = memo(
-  ({ message, isPartOfGroup, showTimestamp, onRetry }: MessageBubbleProps) => {
+  ({
+    message,
+    isPartOfGroup,
+    showTimestamp,
+    onRetry,
+    onLongPress,
+  }: MessageBubbleProps) => {
     const { themeMode } = useTheme();
     const colors = getColors(themeMode);
     const styles = useMemo(() => createStyles(colors), [colors]);
@@ -45,11 +52,13 @@ const MessageBubble = memo(
           !isPartOfGroup && styles.firstInGroup,
         ]}
       >
-        <View
+        <TouchableOpacity
           style={[
             styles.bubbleWrapper,
             isBot ? styles.bubbleWrapperBot : styles.bubbleWrapperUser,
           ]}
+          onLongPress={() => onLongPress?.(message)}
+          activeOpacity={0.7}
         >
           <View style={styles.bubbleRow}>
             <View style={styles.bubbleShadow}>
@@ -112,7 +121,7 @@ const MessageBubble = memo(
               </View>
             </View>
           </View>
-        </View>
+        </TouchableOpacity>
         {showTimestamp && (
           <Text style={styles.timestamp}>
             {new Date(message.created_at).toLocaleTimeString([], {

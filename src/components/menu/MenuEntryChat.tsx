@@ -132,6 +132,11 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
   const [processingSteps, setProcessingSteps] = useState<ProcessingStep[]>([]);
   const [predictedIntent, setPredictedIntent] =
     useState<IntentPredictionResult | null>(null);
+  const [isNoteSelectionMode, setIsNoteSelectionMode] = useState(false);
+  const [selectedNotes, setSelectedNotes] = useState<Set<string>>(new Set());
+  const [emotionsScrollX, setEmotionsScrollX] = useState(0);
+  const [emotionsScrollViewWidth, setEmotionsScrollViewWidth] = useState(0);
+  const [emotionsContentWidth, setEmotionsContentWidth] = useState(0);
 
   // Notify parent component when mode changes
   useEffect(() => {
@@ -207,7 +212,9 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     async (feeling: string) => {
       setSelectedFeelings((prev) => {
         const exists = prev.includes(feeling);
-        const next = exists ? prev.filter((item) => item !== feeling) : [...prev, feeling];
+        const next = exists
+          ? prev.filter((item) => item !== feeling)
+          : [...prev, feeling];
         updateJournalEntry(entry.id, { feeling_tags: next }).catch((error) => {
           console.error("Failed to update feelings", error);
           onErrorUpdate("Unable to update feelings right now.");
@@ -223,12 +230,16 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     const trimmed = composerText.trim();
     if (!trimmed) return;
 
+    // Clear input immediately
+    setComposerText("");
+
     const entryId = entry.id;
     setIsWorkingWithAI(true);
     onErrorUpdate(null);
 
     let timeline = createProcessingTimeline();
     setProcessingSteps(timeline);
+    let thinkingAnnotation: Annotation | null = null;
 
     const setTimeline = (
       stepId: ProcessingStepId,
@@ -300,6 +311,21 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
       const updatedAnnotations = [...annotations, userAnnotation];
       onAnnotationsUpdate(updatedAnnotations);
 
+      // Add thinking message
+      thinkingAnnotation = {
+        id: `thinking-${Date.now()}`,
+        entryId: userAnnotation.entryId,
+        kind: "bot",
+        channel: "ai",
+        content: "Riflett is thinking...",
+        created_at: new Date().toISOString(),
+        metadata: {
+          isThinking: true,
+        },
+      };
+
+      onAnnotationsUpdate([...updatedAnnotations, thinkingAnnotation]);
+
       setTimeline("openai_request", "running", "Sending prompt");
 
       const aiResult = await generateAIResponse({
@@ -357,9 +383,12 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         },
       };
 
-      onAnnotationsUpdate([...updatedAnnotations, botAnnotation]);
+      // Remove thinking message and add actual response
+      const finalAnnotations = updatedAnnotations.filter(
+        (ann) => thinkingAnnotation && ann.id !== thinkingAnnotation.id
+      );
+      onAnnotationsUpdate([...finalAnnotations, botAnnotation]);
       onErrorUpdate(null);
-      setComposerText("");
     } catch (error) {
       console.error("Error requesting AI guidance", error);
       setTimeline(
@@ -367,6 +396,15 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         "error",
         error instanceof Error ? error.message : "Unable to contact AI"
       );
+
+      // Remove thinking message on error
+      if (thinkingAnnotation) {
+        const finalAnnotations = annotations.filter(
+          (ann: Annotation) => ann.id !== thinkingAnnotation!.id
+        );
+        onAnnotationsUpdate(finalAnnotations);
+      }
+
       onErrorUpdate(
         error instanceof Error
           ? error.message
@@ -390,10 +428,7 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         });
 
         await updateJournalEntry(entry.id, {
-          linked_moments: [
-            ...(entry.linked_moments ?? []),
-            moment.id,
-          ],
+          linked_moments: [...(entry.linked_moments ?? []), moment.id],
         });
 
         if (onRefreshAnnotations) {
@@ -408,124 +443,145 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     [entry, onRefreshAnnotations]
   );
 
-  const renderAnnotationItem = useCallback(({ item }: { item: Annotation }) => {
-    const isUser = item.kind === "user";
-    const isNote = item.channel === "note";
-    const label = formatAnnotationLabel(item.channel);
+  const renderAnnotationItem = useCallback(
+    ({ item }: { item: Annotation }) => {
+      const isUser = item.kind === "user";
+      const isNote = item.channel === "note";
+      const label = formatAnnotationLabel(item.channel);
 
-    // Render notes as elegant journal entries
-    if (isNote) {
-      return (
-        <Pressable
-          style={({ pressed }) => [
-            styles.noteEntryWrapper,
-            pressed && styles.noteEntryWrapperPressed,
-          ]}
-          onLongPress={() => {
-            if (item.id) {
-              handleDeleteNote(item.id);
-            }
-          }}
-          delayLongPress={500}
-        >
-          {({ pressed }) => (
-            <View
-              style={[
-                styles.noteEntryInner,
-                pressed && styles.noteEntryInnerPressed,
-              ]}
-            >
-              <View style={styles.noteContent}>
-                <Text style={styles.noteText}>{item.content}</Text>
-                {item.created_at && (
-                  <Text style={styles.noteTimestamp}>
-                    {new Date(item.created_at).toLocaleDateString()}
-                  </Text>
-                )}
+      // Render notes as elegant journal entries
+      if (isNote) {
+        const isSelected = item.id ? selectedNotes.has(item.id) : false;
+        return (
+          <Pressable
+            style={({ pressed }) => [
+              styles.noteEntryWrapper,
+              isSelected && styles.selectedNoteItem,
+              pressed && styles.noteEntryWrapperPressed,
+            ]}
+            onLongPress={() => {
+              if (item.id) {
+                if (isNoteSelectionMode) {
+                  handleToggleNoteSelection(item.id);
+                } else {
+                  handleLongPressNote(item.id);
+                }
+              }
+            }}
+            onPress={() => {
+              if (isNoteSelectionMode && item.id) {
+                handleToggleNoteSelection(item.id);
+              }
+            }}
+            delayLongPress={500}
+          >
+            {({ pressed }) => (
+              <View
+                style={[
+                  styles.noteEntryInner,
+                  isSelected && styles.selectedNoteItemInner,
+                  pressed && styles.noteEntryInnerPressed,
+                ]}
+              >
+                <View style={styles.noteContent}>
+                  <Text style={styles.noteText}>{item.content}</Text>
+                  {item.created_at && (
+                    <Text style={styles.noteTimestamp}>
+                      {new Date(item.created_at).toLocaleDateString()}
+                    </Text>
+                  )}
+                </View>
               </View>
-            </View>
-          )}
-        </Pressable>
-      );
-    }
+            )}
+          </Pressable>
+        );
+      }
 
-    // Render AI chat as bubbles
-    return (
-      <View
-        style={[
-          styles.annotationBubbleRow,
-          isUser ? styles.annotationRowUser : styles.annotationRowOther,
-        ]}
-      >
+      // Render AI chat as bubbles
+      const isThinking = item.metadata?.isThinking;
+      return (
         <View
           style={[
-            styles.annotationBubbleWrapper,
-            isUser
-              ? styles.annotationBubbleWrapperUser
-              : styles.annotationBubbleWrapperOther,
+            styles.annotationBubbleRow,
+            isUser ? styles.annotationRowUser : styles.annotationRowOther,
           ]}
         >
           <View
             style={[
-              styles.annotationBubble,
+              styles.annotationBubbleWrapper,
               isUser
-                ? styles.annotationBubbleUser
-                : styles.annotationBubbleOther,
+                ? styles.annotationBubbleWrapperUser
+                : styles.annotationBubbleWrapperOther,
             ]}
           >
-            <Text
+            <View
               style={[
-                styles.annotationLabel,
+                styles.annotationBubble,
                 isUser
-                  ? styles.annotationLabelUser
-                  : styles.annotationLabelOther,
+                  ? styles.annotationBubbleUser
+                  : styles.annotationBubbleOther,
               ]}
             >
-              {label}
-            </Text>
-            <Text
-              style={[
-                styles.annotationText,
-                isUser ? styles.annotationTextUser : styles.annotationTextOther,
-              ]}
-            >
-              {item.content}
-            </Text>
-            {item.created_at && (
               <Text
                 style={[
-                  styles.annotationTimestamp,
+                  styles.annotationLabel,
                   isUser
-                    ? styles.annotationTimestampUser
-                    : styles.annotationTimestampOther,
+                    ? styles.annotationLabelUser
+                    : styles.annotationLabelOther,
                 ]}
               >
-                {new Date(item.created_at).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                {isThinking ? "Riflett" : label}
               </Text>
-            )}
-            {isUser && (
-              <View style={styles.annotationActions}>
-                <TouchableOpacity
-                  onPress={() => handleSaveAtomicMoment(item)}
-                  style={styles.atomicMomentButton}
+              <Text
+                style={[
+                  styles.annotationText,
+                  isUser
+                    ? styles.annotationTextUser
+                    : styles.annotationTextOther,
+                  isThinking && styles.thinkingMessage,
+                ]}
+              >
+                {item.content}
+              </Text>
+              {item.created_at && (
+                <Text
+                  style={[
+                    styles.annotationTimestamp,
+                    isUser
+                      ? styles.annotationTimestampUser
+                      : styles.annotationTimestampOther,
+                  ]}
                 >
-                  <Ionicons
-                    name="sparkles-outline"
-                    size={14}
-                    color={colors.accent}
-                  />
-                  <Text style={styles.atomicMomentButtonText}>Save Moment</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+                  {new Date(item.created_at).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </Text>
+              )}
+              {isUser && (
+                <View style={styles.annotationActions}>
+                  <TouchableOpacity
+                    onPress={() => handleSaveAtomicMoment(item)}
+                    style={styles.atomicMomentButton}
+                  >
+                    <Ionicons
+                      name="sparkles-outline"
+                      size={14}
+                      color={colors.accent}
+                    />
+                    <Text style={styles.atomicMomentButtonText}>
+                      Save Moment
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           </View>
         </View>
-      </View>
-    );
-  }, [colors.accent, handleSaveAtomicMoment]);
+      );
+    },
+    [colors.accent, handleSaveAtomicMoment, selectedNotes, isNoteSelectionMode]
+  );
 
   const disableNoteSend = isSavingNote || !composerText.trim();
   const disableAISend = isWorkingWithAI || !composerText.trim();
@@ -581,6 +637,223 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     ]
   );
 
+  const handleLongPressNote = useCallback((annotationId: string) => {
+    setIsNoteSelectionMode(true);
+    setSelectedNotes(new Set([annotationId]));
+  }, []);
+
+  const handleToggleNoteSelection = useCallback((annotationId: string) => {
+    setSelectedNotes((prev) => {
+      const next = new Set(prev);
+      if (next.has(annotationId)) {
+        next.delete(annotationId);
+      } else {
+        next.add(annotationId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleCancelNoteSelection = useCallback(() => {
+    setIsNoteSelectionMode(false);
+    setSelectedNotes(new Set());
+  }, []);
+
+  const handleDeleteSelectedNotes = useCallback(async () => {
+    if (!entry?.id || selectedNotes.size === 0) return;
+
+    try {
+      const noteIds = Array.from(selectedNotes);
+      await Promise.all(
+        noteIds.map((noteId) =>
+          supabase.from("messages").delete().eq("id", noteId)
+        )
+      );
+
+      onAnnotationCountUpdate(entry.id, -selectedNotes.size);
+
+      if (onRefreshAnnotations) {
+        onRefreshAnnotations();
+      }
+
+      setIsNoteSelectionMode(false);
+      setSelectedNotes(new Set());
+    } catch (error) {
+      console.error("Failed to delete selected notes:", error);
+      onErrorUpdate("Unable to delete notes right now.");
+    }
+  }, [
+    entry?.id,
+    selectedNotes,
+    onAnnotationCountUpdate,
+    onRefreshAnnotations,
+    onErrorUpdate,
+  ]);
+
+  const handleEmotionsScroll = useCallback((event: any) => {
+    setEmotionsScrollX(event.nativeEvent.contentOffset.x);
+  }, []);
+
+  const handleEmotionsLayout = useCallback((width: number, height: number) => {
+    if (width && width > 0) {
+      setEmotionsContentWidth(width);
+    }
+  }, []);
+
+  const handleEmotionsScrollViewLayout = useCallback((event: any) => {
+    setEmotionsScrollViewWidth(event.nativeEvent.layout.width);
+  }, []);
+
+  // Filter emotions based on similarity to the highlighted emotion
+  const getSimilarEmotions = useCallback(() => {
+    if (!emotion) return { moods: MOOD_OPTIONS, feelings: FEELING_OPTIONS };
+
+    const emotionLower = emotion.toLowerCase();
+
+    // Define emotion similarity groups
+    const emotionGroups = {
+      positive: [
+        "centered",
+        "calm",
+        "optimistic",
+        "grateful",
+        "productive",
+        "inspired",
+        "connected",
+        "proud",
+        "hopeful",
+        "motivated",
+        "happy",
+        "joyful",
+        "content",
+        "peaceful",
+        "confident",
+        "energetic",
+        "excited",
+        "cheerful",
+        "satisfied",
+        "fulfilled",
+      ],
+      negative: [
+        "anxious",
+        "overwhelmed",
+        "drained",
+        "stressed",
+        "lonely",
+        "frustrated",
+        "tired",
+        "angry",
+        "anger",
+        "mad",
+        "irritated",
+        "annoyed",
+        "upset",
+        "disappointed",
+        "sad",
+        "depressed",
+        "miserable",
+        "hopeless",
+        "desperate",
+        "worried",
+        "nervous",
+        "fearful",
+        "scared",
+        "terrified",
+        "hurt",
+        "betrayed",
+        "rejected",
+        "abandoned",
+        "guilty",
+        "ashamed",
+        "embarrassed",
+        "humiliated",
+      ],
+      reflective: [
+        "reflective",
+        "curious",
+        "contemplative",
+        "thoughtful",
+        "introspective",
+        "meditative",
+      ],
+    };
+
+    // Find which group the highlighted emotion belongs to
+    let targetGroup = "positive"; // default
+    for (const [group, emotions] of Object.entries(emotionGroups)) {
+      if (
+        emotions.some((e) => {
+          // More flexible matching
+          const emotionWords = emotionLower.split(/\s+/);
+          const emotionWordsInGroup = e.split(/\s+/);
+
+          return (
+            emotionWords.some((word) =>
+              emotionWordsInGroup.some(
+                (groupWord) =>
+                  word.includes(groupWord) || groupWord.includes(word)
+              )
+            ) ||
+            emotionLower.includes(e) ||
+            e.includes(emotionLower)
+          );
+        })
+      ) {
+        targetGroup = group;
+        break;
+      }
+    }
+
+    // Debug logging
+    console.log("Highlighted emotion:", emotion);
+    console.log("Target group:", targetGroup);
+
+    // Filter emotions to only show those from the same group
+    const similarMoods = MOOD_OPTIONS.filter((mood) =>
+      emotionGroups[targetGroup as keyof typeof emotionGroups].some((e) => {
+        const moodLower = mood.toLowerCase();
+        const moodWords = moodLower.split(/\s+/);
+        const emotionWordsInGroup = e.split(/\s+/);
+
+        return (
+          moodWords.some((word) =>
+            emotionWordsInGroup.some(
+              (groupWord) =>
+                word.includes(groupWord) || groupWord.includes(word)
+            )
+          ) ||
+          moodLower.includes(e) ||
+          e.includes(moodLower)
+        );
+      })
+    );
+
+    const similarFeelings = FEELING_OPTIONS.filter((feeling) =>
+      emotionGroups[targetGroup as keyof typeof emotionGroups].some((e) => {
+        const feelingLower = feeling.toLowerCase();
+        const feelingWords = feelingLower.split(/\s+/);
+        const emotionWordsInGroup = e.split(/\s+/);
+
+        return (
+          feelingWords.some((word) =>
+            emotionWordsInGroup.some(
+              (groupWord) =>
+                word.includes(groupWord) || groupWord.includes(word)
+            )
+          ) ||
+          feelingLower.includes(e) ||
+          e.includes(feelingLower)
+        );
+      })
+    );
+
+    // Debug logging
+    console.log("Similar moods:", similarMoods);
+    console.log("Similar feelings:", similarFeelings);
+
+    return { moods: similarMoods, feelings: similarFeelings };
+  }, [emotion]);
+
   // Separate annotations by channel
   const noteAnnotations = annotations.filter(
     (annotation) => annotation.channel === "note"
@@ -597,114 +870,6 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
       enabled={true}
     >
       {/* Static Header - Entry Summary */}
-      {entry && (
-        <View style={styles.entrySummary}>
-          <Text style={styles.entrySummaryContent}>{entry.content}</Text>
-          {entry.created_at && (
-            <Text style={styles.entrySummaryDate}>
-              {new Date(entry.created_at).toLocaleString()}
-            </Text>
-          )}
-          {summary ? (
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryTitle}>Highlights</Text>
-              <Text style={styles.summaryBody}>{summary}</Text>
-              {emotion && (
-                <Text style={styles.summaryFooter}>{`Emotion: ${emotion}`}</Text>
-              )}
-            </View>
-          ) : null}
-          {entry.type === "journal" && (
-            <>
-              <View style={styles.moodContainer}>
-                <Text style={styles.sectionLabel}>Mood</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.moodScroll}
-                >
-                  {MOOD_OPTIONS.map((mood) => {
-                    const active = selectedMood === mood;
-                    return (
-                      <TouchableOpacity
-                        key={mood}
-                        style={[
-                          styles.moodChip,
-                          active && styles.moodChipActive,
-                        ]}
-                        onPress={() => handleMoodSelect(mood)}
-                      >
-                        <Text
-                          style={[
-                            styles.moodChipText,
-                            active && styles.moodChipTextActive,
-                          ]}
-                        >
-                          {mood}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </View>
-              <View style={styles.feelingsContainer}>
-                <Text style={styles.sectionLabel}>Feelings</Text>
-                <View style={styles.feelingsWrap}>
-                  {FEELING_OPTIONS.map((feeling) => {
-                    const active = selectedFeelings.includes(feeling);
-                    return (
-                      <TouchableOpacity
-                        key={feeling}
-                        style={[
-                          styles.feelingChip,
-                          active && styles.feelingChipActive,
-                        ]}
-                        onPress={() => handleToggleFeeling(feeling)}
-                      >
-                        <Text
-                          style={[
-                            styles.feelingChipText,
-                            active && styles.feelingChipTextActive,
-                          ]}
-                        >
-                          {feeling}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            </>
-          )}
-          {moments.length > 0 && (
-            <View style={styles.momentsContainer}>
-              <Text style={styles.sectionLabel}>Atomic Moments</Text>
-              {moments.map((moment) => (
-                <View key={moment.id} style={styles.momentCard}>
-                  <View style={styles.momentHeader}>
-                    <Ionicons
-                      name="sparkles-outline"
-                      size={16}
-                      color={colors.accent}
-                    />
-                    <Text style={styles.momentScore}>{`Importance ${moment.importance_score}/10`}</Text>
-                  </View>
-                  <Text style={styles.momentContent}>{moment.content}</Text>
-                  {moment.tags?.length ? (
-                    <View style={styles.momentTags}>
-                      {moment.tags.map((tag) => (
-                        <View key={tag} style={styles.momentTagChip}>
-                          <Text style={styles.momentTagText}>{tag}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  ) : null}
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-      )}
 
       <ScrollView
         style={styles.scrollContainer}
@@ -734,13 +899,171 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         {/* Notes Section */}
         {composerMode === "note" && (
           <View style={styles.sectionContainer}>
+            {entry && (
+              <View style={styles.entrySummary}>
+                <Text style={styles.entrySummaryContent}>{entry.content}</Text>
+                {entry.created_at && (
+                  <Text style={styles.entrySummaryDate}>
+                    {new Date(entry.created_at).toLocaleString()}
+                  </Text>
+                )}
+                {summary ? (
+                  <View style={styles.summaryCard}>
+                    <Text style={styles.summaryTitle}>Highlights</Text>
+                    <Text style={styles.summaryBody}>{summary}</Text>
+                    {emotion && (
+                      <Text
+                        style={styles.summaryFooter}
+                      >{`Emotion: ${emotion.charAt(0).toUpperCase() + emotion.slice(1).toLowerCase()}`}</Text>
+                    )}
+                  </View>
+                ) : null}
+                {entry.type === "journal" && (
+                  <View style={styles.emotionsContainer}>
+                    <Text style={styles.sectionLabel}>
+                      {emotion
+                        ? `Feeling: ${emotion.charAt(0).toUpperCase() + emotion.slice(1).toLowerCase()}`
+                        : "Emotions"}
+                    </Text>
+                    <View style={styles.emotionsCarouselWrapper}>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.emotionsScroll}
+                        onScroll={handleEmotionsScroll}
+                        onContentSizeChange={handleEmotionsLayout}
+                        onLayout={handleEmotionsScrollViewLayout}
+                        scrollEventThrottle={16}
+                        decelerationRate="fast"
+                        snapToInterval={120}
+                        snapToAlignment="start"
+                        bounces={false}
+                      >
+                        {(() => {
+                          const { moods, feelings } = getSimilarEmotions();
+                          return (
+                            <>
+                              {moods.map((mood) => {
+                                const active = selectedMood === mood;
+                                return (
+                                  <TouchableOpacity
+                                    key={mood}
+                                    style={[
+                                      styles.emotionChip,
+                                      active && styles.emotionChipActive,
+                                    ]}
+                                    onPress={() => handleMoodSelect(mood)}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.emotionChipText,
+                                        active && styles.emotionChipTextActive,
+                                      ]}
+                                    >
+                                      {mood}
+                                    </Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                              {feelings.map((feeling) => {
+                                const active =
+                                  selectedFeelings.includes(feeling);
+                                return (
+                                  <TouchableOpacity
+                                    key={feeling}
+                                    style={[
+                                      styles.emotionChip,
+                                      active && styles.emotionChipActive,
+                                    ]}
+                                    onPress={() => handleToggleFeeling(feeling)}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.emotionChipText,
+                                        active && styles.emotionChipTextActive,
+                                      ]}
+                                    >
+                                      {feeling}
+                                    </Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </>
+                          );
+                        })()}
+                      </ScrollView>
+                      {emotionsContentWidth > emotionsScrollViewWidth &&
+                        emotionsScrollViewWidth > 0 && (
+                          <View style={styles.carouselIndicators}>
+                            {Array.from({
+                              length: Math.ceil(
+                                emotionsContentWidth / emotionsScrollViewWidth
+                              ),
+                            }).map((_, index) => {
+                              const indicatorPosition =
+                                index * emotionsScrollViewWidth;
+                              const isActive =
+                                emotionsScrollX >=
+                                  indicatorPosition -
+                                    emotionsScrollViewWidth / 2 &&
+                                emotionsScrollX <
+                                  indicatorPosition +
+                                    emotionsScrollViewWidth / 2;
+                              return (
+                                <View
+                                  key={index}
+                                  style={[
+                                    styles.carouselIndicator,
+                                    isActive && styles.carouselIndicatorActive,
+                                  ]}
+                                />
+                              );
+                            })}
+                          </View>
+                        )}
+                    </View>
+                  </View>
+                )}
+                {moments.length > 0 && (
+                  <View style={styles.momentsContainer}>
+                    <Text style={styles.sectionLabel}>Atomic Moments</Text>
+                    {moments.map((moment) => (
+                      <View key={moment.id} style={styles.momentCard}>
+                        <View style={styles.momentHeader}>
+                          <Ionicons
+                            name="sparkles-outline"
+                            size={16}
+                            color={colors.accent}
+                          />
+                          <Text
+                            style={styles.momentScore}
+                          >{`Importance ${moment.importance_score}/10`}</Text>
+                        </View>
+                        <Text style={styles.momentContent}>
+                          {moment.content}
+                        </Text>
+                        {moment.tags?.length ? (
+                          <View style={styles.momentTags}>
+                            {moment.tags.map((tag) => (
+                              <View key={tag} style={styles.momentTagChip}>
+                                <Text style={styles.momentTagText}>{tag}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        ) : null}
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
             {!loading && noteAnnotations.length === 0 && !error && (
               <View style={styles.emptyStateContainer}>
                 <Text style={styles.emptyState}>
                   No notes yet. Add your first note below.
                 </Text>
                 <Text style={styles.emptyStateHint}>
-                  Long-press any note to delete it
+                  Long-press any note to select multiple for deletion
                 </Text>
               </View>
             )}
@@ -779,130 +1102,164 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         )}
       </ScrollView>
 
-      <View style={styles.noteInputRow}>
-        <View style={styles.modeSwitcher}>
-          <Pressable
-            onPress={() => setComposerMode("note")}
-            style={({ pressed }) => [
-              styles.modeButtonWrapper,
-              composerMode === "note" && styles.modeButtonWrapperActive,
-              pressed && styles.modeButtonWrapperPressed,
-            ]}
+      {isNoteSelectionMode ? (
+        <View style={styles.noteSelectionFooter}>
+          <TouchableOpacity
+            style={styles.noteCancelButton}
+            onPress={handleCancelNoteSelection}
           >
-            <View
-              style={[
-                styles.modeButton,
-                composerMode === "note" && styles.modeButtonActive,
+            <Text style={styles.noteCancelButtonText}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={styles.noteSelectionCounter}>
+            {selectedNotes.size} selected
+          </Text>
+          <TouchableOpacity
+            style={[
+              styles.noteDeleteSelectedButton,
+              selectedNotes.size === 0 &&
+                styles.noteDeleteSelectedButtonDisabled,
+            ]}
+            onPress={handleDeleteSelectedNotes}
+            disabled={selectedNotes.size === 0}
+          >
+            <Ionicons
+              name="trash-outline"
+              size={16}
+              color={
+                selectedNotes.size === 0
+                  ? colors.textTertiary
+                  : colors.background
+              }
+            />
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.noteInputRow}>
+          <View style={styles.modeSwitcher}>
+            <Pressable
+              onPress={() => setComposerMode("note")}
+              style={({ pressed }) => [
+                styles.modeButtonWrapper,
+                composerMode === "note" && styles.modeButtonWrapperActive,
+                pressed && styles.modeButtonWrapperPressed,
               ]}
             >
-              <Text
+              <View
                 style={[
-                  styles.modeButtonText,
-                  composerMode === "note" && styles.modeButtonTextActive,
+                  styles.modeButton,
+                  composerMode === "note" && styles.modeButtonActive,
                 ]}
               >
-                Note
-              </Text>
-            </View>
-          </Pressable>
-          <Pressable
-            onPress={() => setComposerMode("ai")}
-            style={({ pressed }) => [
-              styles.modeButtonWrapper,
-              composerMode === "ai" && styles.modeButtonWrapperActive,
-              pressed && styles.modeButtonWrapperPressed,
-            ]}
-          >
-            <View
-              style={[
-                styles.modeButton,
-                composerMode === "ai" && styles.modeButtonActive,
+                <Text
+                  style={[
+                    styles.modeButtonText,
+                    composerMode === "note" && styles.modeButtonTextActive,
+                  ]}
+                >
+                  Note
+                </Text>
+              </View>
+            </Pressable>
+            <Pressable
+              onPress={() => setComposerMode("ai")}
+              style={({ pressed }) => [
+                styles.modeButtonWrapper,
+                composerMode === "ai" && styles.modeButtonWrapperActive,
+                pressed && styles.modeButtonWrapperPressed,
               ]}
             >
-              <Text
+              <View
                 style={[
-                  styles.modeButtonText,
-                  composerMode === "ai" && styles.modeButtonTextActive,
+                  styles.modeButton,
+                  composerMode === "ai" && styles.modeButtonActive,
                 ]}
               >
-                AI
-              </Text>
-            </View>
-          </Pressable>
-          {composerMode === "ai" && processingSteps.length > 0 && (
-            <View style={styles.processingRow}>
-              {processingSteps.map((step) => {
-                let color = colors.border;
-                if (step.status === "running") color = colors.accent;
-                else if (step.status === "done") color = colors.success;
-                else if (step.status === "error") color = colors.error;
+                <Text
+                  style={[
+                    styles.modeButtonText,
+                    composerMode === "ai" && styles.modeButtonTextActive,
+                  ]}
+                >
+                  AI
+                </Text>
+              </View>
+            </Pressable>
+            {composerMode === "ai" && processingSteps.length > 0 && (
+              <View style={styles.processingRow}>
+                {processingSteps.map((step) => {
+                  let color = colors.border;
+                  if (step.status === "running") color = colors.accent;
+                  else if (step.status === "done") color = colors.success;
+                  else if (step.status === "error") color = colors.error;
 
-                return (
-                  <View
-                    key={step.id}
-                    style={[
-                      styles.processingDot,
-                      { backgroundColor: color },
-                      step.status === "skipped" && styles.processingDotSkipped,
-                    ]}
-                  />
-                );
-              })}
+                  return (
+                    <View
+                      key={step.id}
+                      style={[
+                        styles.processingDot,
+                        { backgroundColor: color },
+                        step.status === "skipped" &&
+                          styles.processingDotSkipped,
+                      ]}
+                    />
+                  );
+                })}
+              </View>
+            )}
+          </View>
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.noteInput}
+              value={composerText}
+              onChangeText={setComposerText}
+              placeholder={
+                composerMode === "ai"
+                  ? "Ask Riflett for insight..."
+                  : "Add an update..."
+              }
+              placeholderTextColor="rgba(244,244,244,0.6)"
+              multiline
+            />
+            <View
+              style={[
+                styles.noteSendWrapper,
+                composerMode === "ai" && styles.noteSendWrapperAI,
+              ]}
+            >
+              <TouchableOpacity
+                style={[
+                  styles.noteSendButton,
+                  ((composerMode === "note" && disableNoteSend) ||
+                    (composerMode === "ai" && disableAISend)) &&
+                    styles.noteSendButtonDisabled,
+                ]}
+                onPress={composerMode === "note" ? handleAddNote : handleAskAI}
+                disabled={
+                  composerMode === "note" ? disableNoteSend : disableAISend
+                }
+              >
+                <Ionicons
+                  name="arrow-up"
+                  size={20}
+                  color={
+                    (composerMode === "note" && disableNoteSend) ||
+                    (composerMode === "ai" && disableAISend)
+                      ? colors.textTertiary
+                      : colors.textPrimary
+                  }
+                />
+              </TouchableOpacity>
             </View>
+          </View>
+          {composerMode === "ai" && predictedIntent && (
+            <Text style={styles.intentSummary}>
+              {`Intent: ${predictedIntent.label} (${Math.round(
+                predictedIntent.confidence * 100
+              )}% confidence)`}
+            </Text>
           )}
         </View>
-        <View style={styles.inputRow}>
-          <TextInput
-            style={styles.noteInput}
-            value={composerText}
-            onChangeText={setComposerText}
-            placeholder={
-              composerMode === "ai"
-                ? "Ask Riflett for insight..."
-                : "Add an update..."
-            }
-            placeholderTextColor="rgba(244,244,244,0.6)"
-            multiline
-          />
-          <View
-            style={[
-              styles.noteSendWrapper,
-              composerMode === "ai" && styles.noteSendWrapperAI,
-            ]}
-          >
-            <TouchableOpacity
-              style={[
-                styles.noteSendButton,
-                ((composerMode === "note" && disableNoteSend) ||
-                  (composerMode === "ai" && disableAISend)) &&
-                  styles.noteSendButtonDisabled,
-              ]}
-              onPress={composerMode === "note" ? handleAddNote : handleAskAI}
-              disabled={
-                composerMode === "note" ? disableNoteSend : disableAISend
-              }
-            >
-              <Ionicons
-                name="arrow-up"
-                size={20}
-                color={
-                  (composerMode === "note" && disableNoteSend) ||
-                  (composerMode === "ai" && disableAISend)
-                    ? colors.textTertiary
-                    : colors.textPrimary
-                }
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-        {composerMode === "ai" && predictedIntent && (
-          <Text style={styles.intentSummary}>
-            {`Intent: ${predictedIntent.label} (${Math.round(
-              predictedIntent.confidence * 100
-            )}% confidence)`}
-          </Text>
-        )}
-      </View>
+      )}
     </KeyboardAvoidingView>
   );
 };
@@ -945,6 +1302,16 @@ const createStyles = (colors: any, insets: any) =>
     noteEntryWrapperPressed: {
       transform: [{ scale: 0.98 }],
     },
+    selectedNoteItem: {
+      borderWidth: 2,
+      borderColor: colors.accent,
+      borderRadius: radii.lg,
+      marginHorizontal: spacing.xs,
+      marginVertical: spacing.xs,
+      backgroundColor: `${colors.accent}08`,
+      transform: [{ scale: 1.02 }],
+      ...shadows.glow,
+    },
     noteEntryInner: {
       backgroundColor: colors.surface,
       borderRadius: radii.md,
@@ -954,6 +1321,10 @@ const createStyles = (colors: any, insets: any) =>
     },
     noteEntryInnerPressed: {
       backgroundColor: colors.surfaceElevated,
+    },
+    selectedNoteItemInner: {
+      backgroundColor: `${colors.accent}12`,
+      borderColor: colors.accent,
     },
     noteContent: {
       padding: spacing.md,
@@ -1044,8 +1415,11 @@ const createStyles = (colors: any, insets: any) =>
       color: colors.textSecondary,
       marginTop: spacing.sm,
     },
-    moodContainer: {
+    emotionsContainer: {
       marginTop: spacing.lg,
+    },
+    emotionsCarouselWrapper: {
+      position: "relative",
     },
     sectionLabel: {
       fontFamily: typography.caption.fontFamily,
@@ -1056,56 +1430,30 @@ const createStyles = (colors: any, insets: any) =>
       textTransform: "uppercase",
       marginBottom: spacing.xs,
     },
-    moodScroll: {
+    emotionsScroll: {
       paddingVertical: spacing.xs,
       gap: spacing.sm,
     },
-    moodChip: {
+    emotionChip: {
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm,
-      borderRadius: radii.xl,
+      borderRadius: radii.lg,
       borderWidth: 1,
       borderColor: colors.border,
       marginRight: spacing.sm,
+      minWidth: 100,
+      alignItems: "center",
     },
-    moodChipActive: {
+    emotionChipActive: {
       borderColor: colors.accent,
       backgroundColor: `${colors.accent}1A`,
     },
-    moodChipText: {
+    emotionChipText: {
       fontFamily: typography.body.fontFamily,
       fontSize: 14,
       color: colors.textSecondary,
     },
-    moodChipTextActive: {
-      color: colors.accent,
-      fontWeight: "600",
-    },
-    feelingsContainer: {
-      marginTop: spacing.lg,
-    },
-    feelingsWrap: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: spacing.sm,
-    },
-    feelingChip: {
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.xs,
-      borderRadius: radii.xl,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    feelingChipActive: {
-      borderColor: colors.accent,
-      backgroundColor: `${colors.accent}14`,
-    },
-    feelingChipText: {
-      fontFamily: typography.caption.fontFamily,
-      fontSize: 12,
-      color: colors.textSecondary,
-    },
-    feelingChipTextActive: {
+    emotionChipTextActive: {
       color: colors.accent,
       fontWeight: "600",
     },
@@ -1147,7 +1495,7 @@ const createStyles = (colors: any, insets: any) =>
     momentTagChip: {
       paddingHorizontal: spacing.sm,
       paddingVertical: spacing.xs,
-      borderRadius: radii.xl,
+      borderRadius: radii.lg,
       backgroundColor: colors.surfaceElevated,
     },
     momentTagText: {
@@ -1377,6 +1725,73 @@ const createStyles = (colors: any, insets: any) =>
     },
     processingDotSkipped: {
       opacity: 0.3,
+    },
+    noteSelectionFooter: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md,
+      backgroundColor: colors.background,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    noteCancelButton: {
+      paddingHorizontal: spacing.xl,
+      paddingVertical: spacing.md,
+      borderRadius: radii.lg,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      flex: 0,
+    },
+    noteCancelButtonText: {
+      fontFamily: typography.button.fontFamily,
+      fontWeight: typography.button.fontWeight,
+      letterSpacing: typography.button.letterSpacing,
+      fontSize: 12,
+      color: colors.textSecondary,
+    },
+    noteSelectionCounter: {
+      fontFamily: typography.caption.fontFamily,
+      fontWeight: "500",
+      letterSpacing: typography.caption.letterSpacing,
+      fontSize: 11,
+      color: colors.textTertiary,
+      marginHorizontal: spacing.sm,
+    },
+    noteDeleteSelectedButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.accent,
+      alignItems: "center",
+      justifyContent: "center",
+      flex: 0,
+    },
+    noteDeleteSelectedButtonDisabled: {
+      backgroundColor: colors.border,
+    },
+    carouselIndicators: {
+      flexDirection: "row",
+      justifyContent: "center",
+      alignItems: "center",
+      marginTop: spacing.sm,
+      gap: spacing.xs,
+    },
+    carouselIndicator: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: colors.border,
+    },
+    carouselIndicatorActive: {
+      backgroundColor: colors.accent,
+      width: 12,
+    },
+    thinkingMessage: {
+      fontStyle: "italic",
+      opacity: 0.7,
     },
   });
 

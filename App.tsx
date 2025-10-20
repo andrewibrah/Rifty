@@ -73,7 +73,10 @@ import {
 } from "./src/constants/storage";
 import { logIntentAudit } from "./src/services/data";
 import { Memory } from "./src/agent/memory";
-import { createChatSession, updateChatSession } from "./src/services/chatSessions";
+import {
+  createChatSession,
+  updateChatSession,
+} from "./src/services/chatSessions";
 import { updateProfileStats } from "./src/services/profile";
 import { generateSessionMetadata } from "./src/services/sessionMetadata";
 import {
@@ -193,57 +196,62 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     }
   }, [personalization?.settings?.checkin_notifications]);
 
-  const loadSessionFromStorage = useCallback(async (): Promise<StoredSession | null> => {
-    try {
-      const raw = await AsyncStorage.getItem(CURRENT_SESSION_STORAGE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as StoredSession;
-      if (parsed && parsed.id && parsed.startedAt) {
-        return {
-          id: parsed.id,
-          startedAt: parsed.startedAt,
-          lastMessageAt: parsed.lastMessageAt,
-          messageCount: Number(parsed.messageCount ?? 0),
-        };
+  const loadSessionFromStorage =
+    useCallback(async (): Promise<StoredSession | null> => {
+      try {
+        const raw = await AsyncStorage.getItem(CURRENT_SESSION_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as StoredSession;
+        if (parsed && parsed.id && parsed.startedAt) {
+          return {
+            id: parsed.id,
+            startedAt: parsed.startedAt,
+            lastMessageAt: parsed.lastMessageAt,
+            messageCount: Number(parsed.messageCount ?? 0),
+          };
+        }
+      } catch (error) {
+        console.warn("[ChatSession] failed to load session", error);
       }
-    } catch (error) {
-      console.warn("[ChatSession] failed to load session", error);
-    }
-    return null;
-  }, []);
+      return null;
+    }, []);
 
-  const saveSessionToStorage = useCallback(async (session: StoredSession | null) => {
-    try {
-      if (!session) {
-        await AsyncStorage.removeItem(CURRENT_SESSION_STORAGE_KEY);
-        return;
+  const saveSessionToStorage = useCallback(
+    async (session: StoredSession | null) => {
+      try {
+        if (!session) {
+          await AsyncStorage.removeItem(CURRENT_SESSION_STORAGE_KEY);
+          return;
+        }
+        await AsyncStorage.setItem(
+          CURRENT_SESSION_STORAGE_KEY,
+          JSON.stringify(session)
+        );
+      } catch (error) {
+        console.warn("[ChatSession] failed to persist session", error);
       }
-      await AsyncStorage.setItem(
-        CURRENT_SESSION_STORAGE_KEY,
-        JSON.stringify(session)
-      );
-    } catch (error) {
-      console.warn("[ChatSession] failed to persist session", error);
-    }
-  }, []);
+    },
+    []
+  );
 
-  const loadStatsFromStorage = useCallback(async (): Promise<SessionStats | null> => {
-    try {
-      const raw = await AsyncStorage.getItem(SESSION_STATS_STORAGE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as SessionStats;
-      if (parsed) {
-        return {
-          missedDayCount: Number(parsed.missedDayCount ?? 0),
-          currentStreak: Number(parsed.currentStreak ?? 0),
-          lastMessageAt: parsed.lastMessageAt ?? null,
-        };
+  const loadStatsFromStorage =
+    useCallback(async (): Promise<SessionStats | null> => {
+      try {
+        const raw = await AsyncStorage.getItem(SESSION_STATS_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as SessionStats;
+        if (parsed) {
+          return {
+            missedDayCount: Number(parsed.missedDayCount ?? 0),
+            currentStreak: Number(parsed.currentStreak ?? 0),
+            lastMessageAt: parsed.lastMessageAt ?? null,
+          };
+        }
+      } catch (error) {
+        console.warn("[ChatSession] failed to load stats", error);
       }
-    } catch (error) {
-      console.warn("[ChatSession] failed to load stats", error);
-    }
-    return null;
-  }, []);
+      return null;
+    }, []);
 
   const saveStatsToStorage = useCallback(async (stats: SessionStats | null) => {
     try {
@@ -251,7 +259,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         await AsyncStorage.removeItem(SESSION_STATS_STORAGE_KEY);
         return;
       }
-      await AsyncStorage.setItem(SESSION_STATS_STORAGE_KEY, JSON.stringify(stats));
+      await AsyncStorage.setItem(
+        SESSION_STATS_STORAGE_KEY,
+        JSON.stringify(stats)
+      );
     } catch (error) {
       console.warn("[ChatSession] failed to persist stats", error);
     }
@@ -629,6 +640,32 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     retryMessage(messageId);
   };
 
+  const handleMessageLongPress = useCallback(
+    (message: ChatMessage) => {
+      if (message.kind === "entry") {
+        Alert.alert(
+          "Navigate to Entry",
+          "Would you like to view this entry in detail?",
+          [
+            {
+              text: "Cancel",
+              style: "cancel",
+            },
+            {
+              text: "View Entry",
+              onPress: () => {
+                // Open the menu and navigate to the entry
+                setShowMenu(true);
+                menuState.handleSelectEntry(message.id);
+              },
+            },
+          ]
+        );
+      }
+    },
+    [menuState]
+  );
+
   const messageGroups = groupMessages(messages);
 
   const renderItem = ({
@@ -645,6 +682,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
           isPartOfGroup={msgIndex !== 0}
           showTimestamp={msgIndex === group.messages.length - 1}
           onRetry={handleRetry}
+          onLongPress={handleMessageLongPress}
         />
       ))}
     </View>
@@ -671,8 +709,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       }
 
       let metadata = await generateSessionMetadata(snapshot).catch(() => {
-        const fallbackSource = snapshot.find((msg) => msg.kind !== "bot") ??
-          snapshot[0];
+        const fallbackSource =
+          snapshot.find((msg) => msg.kind !== "bot") ?? snapshot[0];
         const title = fallbackSource?.content
           ? fallbackSource.content.slice(0, 40)
           : "Reflection";

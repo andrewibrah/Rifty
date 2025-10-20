@@ -20,8 +20,8 @@ import { useEntryChat } from "../../hooks/useEntryChat";
 import MenuList from "../menu/MenuList";
 import MenuEntryChat from "../menu/MenuEntryChat";
 import AtomicMomentsPanel from "../menu/AtomicMomentsPanel";
-import GoalsPanel from "../menu/GoalsPanel";
-import ReviewPanel from "../menu/ReviewPanel";
+import GoalsPanel, { GoalsPanelRef } from "../menu/GoalsPanel";
+import ReviewPanel, { ReviewPanelRef } from "../menu/ReviewPanel";
 import SettingsModal from "./SettingsModal";
 import HistoryModal from "./ChatHistoryModal";
 import { getColors, spacing, typography, radii } from "../../theme";
@@ -62,6 +62,8 @@ const MenuModal: React.FC<MenuModalProps> = ({
   const [showMoments, setShowMoments] = useState(false);
   const [showGoalsDashboard, setShowGoalsDashboard] = useState(false);
   const [showReviewPanel, setShowReviewPanel] = useState(false);
+  const reviewPanelRef = useRef<{ refresh: () => void }>(null);
+  const goalsPanelRef = useRef<{ addGoal: () => void }>(null);
 
   // Use passed menu state or create new one
   const menuState = passedMenuState || useMenuState();
@@ -180,7 +182,10 @@ const MenuModal: React.FC<MenuModalProps> = ({
       onRequestClose={onClose}
     >
       <SafeAreaProvider>
-        {showEntryChat || showMoments || showGoalsDashboard || showReviewPanel ? (
+        {showEntryChat ||
+        showMoments ||
+        showGoalsDashboard ||
+        showReviewPanel ? (
           // Full screen entry chat
           <View style={styles.fullScreenContainer}>
             <SafeAreaView
@@ -225,12 +230,42 @@ const MenuModal: React.FC<MenuModalProps> = ({
                             : "AI Chat"
                           : null}
                 </Text>
-                {showMoments || showGoalsDashboard || showReviewPanel ? (
+                {showMoments ? (
                   <View style={styles.headerSpacer} />
+                ) : showGoalsDashboard ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      goalsPanelRef.current?.addGoal();
+                    }}
+                    style={styles.addButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add new goal"
+                  >
+                    <Ionicons
+                      name="add-outline"
+                      size={20}
+                      color={colors.textPrimary}
+                    />
+                  </TouchableOpacity>
+                ) : showReviewPanel ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      reviewPanelRef.current?.refresh();
+                    }}
+                    style={styles.refreshButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Refresh weekly review"
+                  >
+                    <Ionicons
+                      name="refresh"
+                      size={20}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
                 ) : entryChat.selectedEntry &&
                   currentChatMode === "ai" &&
-                  entryChat.annotations.filter((a) => a.channel === "ai").length >
-                    0 ? (
+                  entryChat.annotations.filter((a) => a.channel === "ai")
+                    .length > 0 ? (
                   <TouchableOpacity
                     onPress={handleClearAIChat}
                     style={styles.clearButton}
@@ -250,9 +285,13 @@ const MenuModal: React.FC<MenuModalProps> = ({
               {showMoments ? (
                 <AtomicMomentsPanel onClose={() => setShowMoments(false)} />
               ) : showGoalsDashboard ? (
-                <GoalsPanel onClose={() => setShowGoalsDashboard(false)} />
+                <GoalsPanel
+                  ref={goalsPanelRef}
+                  onClose={() => setShowGoalsDashboard(false)}
+                />
               ) : showReviewPanel ? (
                 <ReviewPanel
+                  ref={reviewPanelRef}
                   onClose={() => setShowReviewPanel(false)}
                   onOpenGoals={() => {
                     setShowReviewPanel(false);
@@ -471,8 +510,25 @@ const createStyles = (colors: any) =>
       backgroundColor: "transparent",
       marginRight: spacing.xs,
     },
+    addButton: {
+      width: 44,
+      height: 44,
+      borderRadius: radii.sm,
+      justifyContent: "center",
+      alignItems: "center",
+      backgroundColor: colors.surface,
+      marginRight: spacing.xs,
+    },
     headerSpacer: {
       width: 36,
+    },
+    refreshButton: {
+      width: 44,
+      height: 44,
+      borderRadius: radii.sm,
+      backgroundColor: colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
     },
     clearButton: {
       flexDirection: "row",
