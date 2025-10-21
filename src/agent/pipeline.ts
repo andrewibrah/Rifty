@@ -1,5 +1,4 @@
 import { getIntentDefinition } from '@/constants/intents';
-import { predictIntent } from '@/native/intent';
 import type { NativeIntentResult } from '@/native/intent';
 import { Memory } from '@/agent/memory';
 import { SlotFiller } from '@/agent/slotFiller';
@@ -9,6 +8,7 @@ import { UserConfig } from '@/agent/userConfig';
 import { buildRoutedIntent, route } from '@/agent/intentRouting';
 import { Telemetry } from '@/agent/telemetry';
 import type { EnrichedPayload, RouteDecision, RoutedIntent } from '@/agent/types';
+import { classifyRiflettIntent, toNativeLabel } from './riflettIntentClassifier';
 
 export interface HandleUtteranceOptions {
   userTimeZone?: string;
@@ -27,21 +27,6 @@ export interface HandleUtteranceResult {
   traceId: string | null;
 }
 
-const KIND_MAP: Record<string, string[]> = {
-  'journal entry': ['entry', 'pref'],
-  'reflection request': ['entry', 'goal'],
-  'goal create': ['goal', 'entry'],
-  'goal check-in': ['goal'],
-  'schedule create': ['event'],
-  'reminder set': ['event'],
-  'settings change': ['pref'],
-};
-
-const kindsFor = (label: string): string[] => {
-  const key = label.toLowerCase();
-  return KIND_MAP[key] ?? ['entry'];
-};
-
 const ensureUserConfig = async (
   override?: Record<string, unknown>
 ): Promise<Record<string, unknown>> => {
@@ -59,7 +44,33 @@ export async function handleUtterance(
     throw new Error('Utterance text is empty');
   }
 
-  const nativeIntent = await predictIntent(trimmed);
+  const searchKinds = options.kindsOverride ?? ['entry', 'goal', 'event', 'pref'];
+  const contextRecords = await Memory.searchTopN({
+    query: trimmed,
+    kinds: searchKinds,
+    topK: options.topK ?? 5,
+  });
+
+  const classification = classifyRiflettIntent({
+    text: trimmed,
+    contextRecords,
+  });
+
+  const nativeIntent: NativeIntentResult = {
+    label: toNativeLabel(classification.label),
+    confidence: classification.confidence,
+    top3: classification.topCandidates.slice(0, 3).map((candidate) => ({
+      label: toNativeLabel(candidate.label),
+      confidence: candidate.confidence,
+    })),
+    topK: classification.topCandidates.map((candidate) => ({
+      label: toNativeLabel(candidate.label),
+      confidence: candidate.confidence,
+    })),
+    modelVersion: 'riflett-heuristic-2025-11-07',
+    matchedTokens: [],
+    tokens: [],
+  };
 
   const baseRouted = buildRoutedIntent(nativeIntent);
   const slotOptions: SlotFillOptions = {};
@@ -67,13 +78,6 @@ export async function handleUtterance(
     slotOptions.userTimeZone = options.userTimeZone;
   }
   const withSlots = SlotFiller.fill(trimmed, baseRouted, slotOptions);
-
-  const searchKinds = options.kindsOverride ?? kindsFor(withSlots.rawLabel);
-  const contextRecords = await Memory.searchTopN({
-    query: trimmed,
-    kinds: searchKinds,
-    topK: options.topK ?? 5,
-  });
 
   const redaction = Redactor.mask(trimmed);
   const userConfig = await ensureUserConfig(options.userConfig);
@@ -83,6 +87,19 @@ export async function handleUtterance(
     intent: withSlots,
     contextSnippets: contextRecords.map((record) => record.text),
     userConfig,
+    classification: {
+      id: classification.label,
+      label: toNativeLabel(classification.label),
+      confidence: classification.confidence,
+      reasons: classification.reasons,
+      targetEntryId: classification.targetEntryId ?? null,
+      targetEntryType: classification.targetEntryType ?? null,
+      duplicateMatch: classification.duplicateMatch ?? null,
+      topCandidates: classification.topCandidates.map((candidate) => ({
+        label: toNativeLabel(candidate.label),
+        confidence: candidate.confidence,
+      })),
+    },
   };
 
   const decision = route(withSlots);

@@ -5,6 +5,7 @@ import type {
   CreateEntryEmbeddingParams,
   SimilarEntry,
 } from '../types/mvp'
+import { isUUID } from '../utils/uuid'
 
 const getOpenAIKey = (): string => {
   const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, any>
@@ -83,6 +84,10 @@ export async function storeEntryEmbedding(
     throw new Error('User not authenticated')
   }
 
+  if (!isUUID(params.entry_id)) {
+    throw new Error('Invalid entry id for embedding storage')
+  }
+
   const { data, error } = await supabase
     .from('entry_embeddings')
     .insert({
@@ -109,6 +114,9 @@ export async function embedEntry(
   entryId: string,
   content: string
 ): Promise<EntryEmbedding> {
+  if (!isUUID(entryId)) {
+    throw new Error('Invalid entry id for embedding generation')
+  }
   const embedding = await generateEmbedding(content)
   return storeEntryEmbedding({ entry_id: entryId, embedding })
 }
@@ -169,6 +177,11 @@ export async function getEntryEmbedding(
     throw new Error('User not authenticated')
   }
 
+  if (!isUUID(entryId)) {
+    console.warn('[getEntryEmbedding] Skipping lookup for invalid entry id', entryId)
+    return null
+  }
+
   const { data, error } = await supabase
     .from('entry_embeddings')
     .select('*')
@@ -195,6 +208,11 @@ export async function deleteEntryEmbedding(entryId: string): Promise<void> {
 
   if (authError || !user) {
     throw new Error('User not authenticated')
+  }
+
+  if (!isUUID(entryId)) {
+    console.warn('[deleteEntryEmbedding] Skipping delete for invalid entry id', entryId)
+    return
   }
 
   const { error } = await supabase

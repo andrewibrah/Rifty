@@ -1,0 +1,16 @@
+
+> riflett@1.0.0 test:codex
+> TS_NODE_TRANSPILE_ONLY=1 TS_NODE_COMPILER_OPTIONS='{"module":"nodenext","moduleResolution":"nodenext","allowImportingTsExtensions":true}' ts-node scripts/run-tests.ts
+
+
+[codex-check] Running TypeScript check
+
+[codex-check] Validating UUID helper
+
+[codex-check] Verifying theme tokens
+
+[codex-check] Validating goal schemas
+
+[codex-check] Checking goals v2 migration policies
+
+[codex-check] All checks passed ✅

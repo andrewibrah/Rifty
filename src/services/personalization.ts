@@ -154,10 +154,12 @@ const fetchSettings = async (): Promise<UserSettings | null> => {
 
 export const fetchPersonalizationBundle =
   async (): Promise<PersonalizationBundle | null> => {
-    const profile = await fetchProfile();
+    const [profile, cachedSettings, remoteSettings] = await Promise.all([
+      fetchProfile(),
+      loadCachedSettings(),
+      fetchSettings(),
+    ]);
     if (!profile) return null;
-    const cachedSettings = await loadCachedSettings();
-    const remoteSettings = await fetchSettings();
 
     let merged = remoteSettings ?? cachedSettings ?? null;
 

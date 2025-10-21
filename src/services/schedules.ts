@@ -105,13 +105,19 @@ Output ISO timestamps and keep recommendations concise.`
       ? parsed.suggestions
       : []
 
-    return suggestions.map((item) => ({
-      title: item.title?.trim() ?? 'Focus Block',
-      start: item.start,
-      end: item.end,
-      focus: item.focus?.trim() ?? 'Deep work',
-      note: item.note?.trim(),
-    }))
+    return suggestions.map((item) => {
+      const base: ScheduleSuggestion = {
+        title: item.title?.trim() ?? 'Focus Block',
+        start: item.start,
+        end: item.end,
+        focus: item.focus?.trim() ?? 'Deep work',
+      }
+      const note = item.note?.trim()
+      if (note) {
+        base.note = note
+      }
+      return base
+    })
   } catch (error) {
     console.error('[scheduleSuggestions] failed', error)
     throw error

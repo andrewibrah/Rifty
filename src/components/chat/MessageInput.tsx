@@ -19,7 +19,7 @@ interface MessageInputProps {
   onSend: () => void;
   processingSteps?: Array<{
     id: string;
-    status: "pending" | "running" | "done" | "error";
+    status: "pending" | "running" | "done" | "error" | "skipped";
   }>;
 }
 

@@ -59,8 +59,8 @@ export function classifyIntent(text: string): RuntimeIntentResult {
   const sorted = withConf.sort((a, b) => b.confidence - a.confidence);
   const topK = sorted.slice(0, MAX_TOP_RESULTS);
   const primary = topK[0] ?? {
-    id: labels[0]?.id ?? 'journal_entry',
-    label: labels[0]?.display ?? 'Journal Entry',
+    id: labels[0]?.id ?? 'conversational',
+    label: labels[0]?.display ?? 'Conversational',
     confidence: 1,
     logScore: 0,
     matchedTokens: [],

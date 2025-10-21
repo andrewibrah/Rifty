@@ -1,10 +1,11 @@
-import { supabase } from "./supabase";
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "./supabase";
 import type { EntryType } from "../services/data";
 import { updateJournalEntry } from "../services/data";
-import Constants from "expo-constants";
 import { summarizeEntry, storeEntrySummary } from "../services/summarization";
 import { embedEntry } from "../services/embeddings";
 import { createAtomicMoment } from "../services/atomicMoments";
+import { isGoalsV2Enabled } from "../utils/flags";
+import type { Goal } from "../types/goal";
 import type {
   EntryNotePayload,
   IntentPredictionResult,
@@ -18,6 +19,7 @@ import type {
   PlannerResponse,
 } from "@/agent/types";
 import type { MemoryRecord } from "@/agent/memory";
+import type { CreateEntrySummaryParams } from "../types/mvp";
 
 export interface ClassifiedEntry {
   id: string;
@@ -53,35 +55,11 @@ export interface CreateEntryFromChatArgs {
 const SOURCE_TAG = "ai";
 
 async function getSupabaseUrl(): Promise<string> {
-  return supabase.supabaseUrl;
+  return SUPABASE_URL;
 }
 
 async function getAnonKey(): Promise<string> {
-  // Get the anon key from the same source as supabase client initialization
-  const extra = ((Constants.expoConfig?.extra as
-    | Record<string, unknown>
-    | undefined) ??
-    (Constants.manifest2 as { extra?: Record<string, unknown> } | null)
-      ?.extra ??
-    {}) as Record<string, unknown>;
-
-  const pickEnvValue = (...values: Array<unknown>): string | undefined => {
-    for (const value of values) {
-      if (typeof value === "string" && value.trim().length > 0) {
-        return value.trim();
-      }
-    }
-    return undefined;
-  };
-
-  const configuredKey = pickEnvValue(
-    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
-    process.env.SUPABASE_ANON_KEY,
-    extra.EXPO_PUBLIC_SUPABASE_ANON_KEY,
-    extra.SUPABASE_ANON_KEY
-  );
-
-  return configuredKey || "anon-key";
+  return SUPABASE_ANON_KEY;
 }
 
 async function getAccessToken(): Promise<string> {
@@ -113,7 +91,7 @@ export interface ProcessedEntryResult {
   summary: any | null;
   embedding_stored: boolean;
   goal_detected: boolean;
-  goal: any | null;
+  goal: Goal | null;
   reflection: string;
 }
 
@@ -186,22 +164,51 @@ export async function createEntryFromChat(
 
   const savedEntry = data as ClassifiedEntry;
 
+  if (isGoalsV2Enabled()) {
+    supabase.functions
+      .invoke("link_reflections", {
+        body: { entry_id: savedEntry.id },
+      })
+      .catch((invokeError) => {
+        console.warn("[createEntryFromChat] link_reflections invoke failed", invokeError);
+      });
+  }
+
   if (args.entryType === "journal") {
     let summaryResult: Awaited<ReturnType<typeof summarizeEntry>> | null = null;
 
     try {
       summaryResult = await summarizeEntry(trimmedContent, "journal");
-      await storeEntrySummary({
+      const summaryPayload: CreateEntrySummaryParams = {
         entry_id: savedEntry.id,
         summary: summaryResult.summary,
-        emotion: summaryResult.emotion,
-        topics: summaryResult.topics,
-        people: summaryResult.people,
-        urgency_level: summaryResult.urgency_level,
-        suggested_action: summaryResult.suggested_action,
-        blockers: summaryResult.blockers,
-        dates_mentioned: summaryResult.dates_mentioned,
-      });
+      };
+      if (summaryResult.emotion) {
+        summaryPayload.emotion = summaryResult.emotion;
+      }
+      if (Array.isArray(summaryResult.topics) && summaryResult.topics.length > 0) {
+        summaryPayload.topics = summaryResult.topics;
+      }
+      if (Array.isArray(summaryResult.people) && summaryResult.people.length > 0) {
+        summaryPayload.people = summaryResult.people;
+      }
+      if (typeof summaryResult.urgency_level === "number") {
+        summaryPayload.urgency_level = summaryResult.urgency_level;
+      }
+      if (summaryResult.suggested_action) {
+        summaryPayload.suggested_action = summaryResult.suggested_action;
+      }
+      if (summaryResult.blockers) {
+        summaryPayload.blockers = summaryResult.blockers;
+      }
+      if (
+        Array.isArray(summaryResult.dates_mentioned) &&
+        summaryResult.dates_mentioned.length > 0
+      ) {
+        summaryPayload.dates_mentioned = summaryResult.dates_mentioned;
+      }
+
+      await storeEntrySummary(summaryPayload);
     } catch (summaryError) {
       console.warn("[entries] summarizeEntry failed", summaryError);
     }
@@ -288,5 +295,16 @@ export async function createEntryMVP(
   }
 
   const data = (await response.json()) as ProcessedEntryResult;
+
+  if (isGoalsV2Enabled()) {
+    supabase.functions
+      .invoke("link_reflections", {
+        body: { entry_id: data.entry.id },
+      })
+      .catch((error) => {
+        console.warn("[createEntryMVP] link_reflections invoke failed", error);
+      });
+  }
+
   return data;
 }

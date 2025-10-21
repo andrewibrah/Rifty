@@ -41,6 +41,7 @@ const PersonalizationSettingsScreen: React.FC<
   const colors = getColors(themeMode);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [isEditing, setIsEditing] = useState(false);
+  const settings = useMemo(() => bundle.settings ?? null, [bundle.settings]);
   const [checkinEnabled, setCheckinEnabled] = useState(
     settings?.checkin_notifications ?? true
   );
@@ -96,9 +97,6 @@ const PersonalizationSettingsScreen: React.FC<
       ]
     );
   };
-
-  const settings = bundle.settings;
-
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
@@ -313,6 +311,28 @@ const createStyles = (colors: any) =>
       color: colors.textSecondary,
       fontSize: 13,
       marginBottom: 4,
+    },
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: spacing.sm,
+      gap: spacing.md,
+    },
+    toggleCopy: {
+      flex: 1,
+      gap: spacing.xs,
+    },
+    toggleLabel: {
+      fontFamily: typography.body.fontFamily,
+      fontWeight: '600',
+      color: colors.textPrimary,
+      fontSize: 15,
+    },
+    toggleHint: {
+      fontFamily: typography.caption.fontFamily,
+      color: colors.textSecondary,
+      fontSize: 12,
     },
     footer: {
       padding: spacing.lg,

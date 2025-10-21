@@ -7,6 +7,7 @@ import {
   listAtomicMomentsForEntry,
   type AtomicMomentRecord,
 } from "../services/atomicMoments";
+import { isUUID } from "../utils/uuid";
 
 export const useEntryChat = (
   selectedEntryId: string | null,
@@ -27,6 +28,21 @@ export const useEntryChat = (
     let isCancelled = false;
 
     if (!visible || selectedEntryId == null) {
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    if (!isUUID(selectedEntryId)) {
+      setSelectedEntry(null);
+      setAnnotations([]);
+      setEntrySummary(null);
+      setEntryEmotion(null);
+      setEntryMoments([]);
+      setAnnotationsError(
+        "Entry details will appear once this entry finishes syncing."
+      );
+      setAnnotationsLoading(false);
       return () => {
         isCancelled = true;
       };
@@ -84,6 +100,18 @@ export const useEntryChat = (
 
   const refreshAnnotations = useCallback(async () => {
     if (!selectedEntryId) return;
+
+    if (!isUUID(selectedEntryId)) {
+      setAnnotations([]);
+      setEntrySummary(null);
+      setEntryEmotion(null);
+      setEntryMoments([]);
+      setAnnotationsError(
+        "Entry details will appear once this entry finishes syncing."
+      );
+      setAnnotationsLoading(false);
+      return;
+    }
 
     setAnnotationsLoading(true);
     setAnnotationsError(null);

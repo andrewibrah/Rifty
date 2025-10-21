@@ -16,11 +16,7 @@
     "active:queue": "ts-node active_learning/buildLabelQueue.ts",
     "active:merge": "ts-node active_learning/mergeLabels.ts",
     "postinstall": "patch-package || true",
-    "mcp:install:core": "cd mcp/core && npm install",
-    "mcp:install:database": "cd mcp/database && npm install",
-    "mcp:install:agent": "cd mcp/agent && npm install",
-    "mcp:install:build": "cd mcp/build && npm install",
-    "mcp:build:core": "cd mcp/core && npm run build"
+    "test:codex": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_COMPILER_OPTIONS='{\"module\":\"nodenext\",\"moduleResolution\":\"nodenext\",\"allowImportingTsExtensions\":true}' ts-node scripts/run-tests.ts"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -40,7 +36,8 @@
     "react-native-gesture-handler": "~2.28.0",
     "react-native-safe-area-context": "5.6.1",
     "react-native-url-polyfill": "^3.0.0",
-    "react-native-web": "^0.21.0"
+    "react-native-web": "^0.21.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^24.6.2",

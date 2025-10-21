@@ -158,17 +158,31 @@ const loadSqliteModule = (): ExpoSqliteModule | null => {
   try {
     // Use CommonJS require to avoid Metro async shim.
     // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-    return require('expo-sqlite') as ExpoSqliteModule;
-  } catch (primaryError) {
-    try {
-      // Some older SDKs expose the legacy entrypoint.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-      return require('expo-sqlite/legacy') as ExpoSqliteModule;
-    } catch (legacyError) {
-      console.warn('[memory] expo-sqlite unavailable', primaryError);
-      console.warn('[memory] expo-sqlite legacy fallback unavailable', legacyError);
-      return null;
+    const baseModule = require('expo-sqlite') as ExpoSqliteModule & {
+      default?: ExpoSqliteModule;
+      legacy?: ExpoSqliteModule;
+    };
+
+    const candidates = [baseModule, baseModule?.default, baseModule?.legacy].filter(
+      (candidate): candidate is ExpoSqliteModule =>
+        !!candidate && typeof candidate === 'object'
+    );
+
+    for (const candidate of candidates) {
+      if (
+        typeof candidate.openDatabaseAsync === 'function' ||
+        typeof candidate.openDatabaseSync === 'function' ||
+        typeof candidate.openDatabase === 'function'
+      ) {
+        return candidate;
+      }
     }
+
+    console.warn('[memory] expo-sqlite module loaded without an openDatabase entrypoint');
+    return null;
+  } catch (error) {
+    console.warn('[memory] expo-sqlite unavailable', error);
+    return null;
   }
 };
 

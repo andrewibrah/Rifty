@@ -33,6 +33,21 @@ export interface EnrichedPayload {
   intent: RoutedIntent;
   contextSnippets: string[];
   userConfig: Record<string, unknown>;
+  classification?: {
+    id: string;
+    label: string;
+    confidence: number;
+    reasons: string[];
+    targetEntryId?: string | null;
+    targetEntryType?: string | null;
+    duplicateMatch?: {
+      id: string;
+      score: number;
+      text: string;
+      kind: string;
+    } | null;
+    topCandidates: { label: string; confidence: number }[];
+  };
 }
 
 export interface RedactionResult {

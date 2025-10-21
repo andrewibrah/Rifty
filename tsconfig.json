@@ -19,6 +19,7 @@
     "noImplicitOverride": true
   },
   "exclude": [
-    "supabase/functions"
+    "supabase/functions",
+    "scripts"
   ]
 }

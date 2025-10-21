@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { isUUID } from '../utils/uuid'
 
 export interface AtomicMomentInput {
   entryId?: string | null
@@ -37,12 +38,16 @@ async function requireUserId(): Promise<string> {
 
 export async function createAtomicMoment(payload: AtomicMomentInput): Promise<AtomicMomentRecord> {
   const userId = await requireUserId()
+  const entryId = payload.entryId && isUUID(payload.entryId) ? payload.entryId : null
+  if (payload.entryId && entryId === null) {
+    console.warn('[createAtomicMoment] Ignoring invalid entry id', payload.entryId)
+  }
 
   const { data, error } = await supabase
     .from('atomic_moments')
     .insert({
       user_id: userId,
-      entry_id: payload.entryId ?? null,
+      entry_id: entryId,
       message_id: payload.messageId ?? null,
       session_id: payload.sessionId ?? null,
       content: payload.content,
@@ -68,7 +73,12 @@ export async function updateAtomicMoment(
 
   const payload: Record<string, any> = {}
 
-  if (updates.entryId !== undefined) payload.entry_id = updates.entryId
+  if (updates.entryId !== undefined) {
+    payload.entry_id = updates.entryId && isUUID(updates.entryId) ? updates.entryId : null
+    if (updates.entryId && !isUUID(updates.entryId)) {
+      console.warn('[updateAtomicMoment] Resetting invalid entry id', updates.entryId)
+    }
+  }
   if (updates.messageId !== undefined) payload.message_id = updates.messageId
   if (updates.sessionId !== undefined) payload.session_id = updates.sessionId
   if (updates.content !== undefined) payload.content = updates.content
@@ -134,6 +144,11 @@ export async function listAtomicMomentsForEntry(
 ): Promise<AtomicMomentRecord[]> {
   const userId = await requireUserId()
   const limit = options.limit ?? 20
+
+  if (!isUUID(entryId)) {
+    console.warn('[listAtomicMomentsForEntry] Skipping lookup for invalid entry id', entryId)
+    return []
+  }
 
   const { data, error } = await supabase
     .from('atomic_moments')

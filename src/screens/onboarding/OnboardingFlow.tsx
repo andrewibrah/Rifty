@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -66,8 +66,6 @@ const defaultState: PersonalizationState = {
   missed_day_notifications: true,
 };
 
-const STEPS = 7;
-
 const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   initialSettings,
   initialTimezone,
@@ -92,19 +90,133 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
 
   const mode = state.personalization_mode;
 
-  const handleUpdate = (patch: Partial<PersonalizationState>) => {
+  const handleUpdate = useCallback((patch: Partial<PersonalizationState>) => {
     setState((prev) => ({ ...prev, ...patch }));
-  };
+  }, []);
+
+  const steps = useMemo(() => {
+    const introStep = (
+      <IntroStep
+        key="intro"
+        mode={mode}
+        localCacheEnabled={state.local_cache_enabled}
+        consentAccepted={consentAccepted}
+        onModeChange={(value: PersonalizationMode) =>
+          handleUpdate({ personalization_mode: value })
+        }
+        onConsentChange={setConsentAccepted}
+        onCacheToggle={(enabled) =>
+          handleUpdate({ local_cache_enabled: enabled })
+        }
+      />
+    );
+
+    const identityStep = (
+      <IdentityStep
+        key="identity"
+        timezone={timezone}
+        onTimezoneChange={setTimezone}
+        cadence={state.cadence}
+        onCadenceChange={(value: ReflectionCadence) =>
+          handleUpdate({ cadence: value })
+        }
+        mode={mode}
+      />
+    );
+
+    const sequence: React.ReactNode[] = [introStep, identityStep];
+
+    if (mode === "full") {
+      sequence.push(
+        <GoalsStep
+          key="goals"
+          selectedGoals={state.goals}
+          onGoalsChange={(goals: GoalKey[]) => handleUpdate({ goals })}
+          goalOptions={GOAL_OPTIONS}
+          mode={mode}
+          extraGoal={state.extra_goal ?? ""}
+          onExtraGoalChange={(value) => handleUpdate({ extra_goal: value })}
+        />,
+        <WorkingStyleStep
+          key="style"
+          learningStyle={state.learning_style}
+          sessionLength={state.session_length_minutes}
+          onLearningStyleChange={(value) =>
+            handleUpdate({ learning_style: value })
+          }
+          onSessionLengthChange={(value) =>
+            handleUpdate({
+              session_length_minutes:
+                value as PersonalizationState["session_length_minutes"],
+            })
+          }
+          mode={mode}
+        />,
+        <ToneStep
+          key="tone"
+          bluntness={state.bluntness}
+          languageIntensity={state.language_intensity}
+          loggingFormat={state.logging_format}
+          spiritualPrompts={state.spiritual_prompts}
+          onUpdate={(patch) => handleUpdate(patch)}
+          mode={mode}
+        />,
+        <AnchorsStep
+          key="anchors"
+          driftRule={state.drift_rule}
+          crisisCard={state.crisis_card ?? ""}
+          onDriftRuleChange={(value) => handleUpdate({ drift_rule: value })}
+          onCrisisCardChange={(value) => handleUpdate({ crisis_card: value })}
+          mode={mode}
+        />
+      );
+    }
+
+    sequence.push(
+      <ReviewStep
+        key="review"
+        state={state}
+        timezone={timezone}
+        confirmed={reviewConfirmed}
+        onConfirmChange={setReviewConfirmed}
+      />
+    );
+
+    return sequence;
+  }, [
+    consentAccepted,
+    handleUpdate,
+    mode,
+    reviewConfirmed,
+    state,
+    timezone,
+  ]);
+
+  useEffect(() => {
+    const nextMaxIndex = steps.length - 1;
+    if (nextMaxIndex < 0) {
+      setStep(0);
+      return;
+    }
+    if (step > nextMaxIndex) {
+      setStep(Math.max(0, nextMaxIndex));
+    }
+  }, [step, steps]);
+
+  const totalSteps = steps.length;
+  const currentStep = steps[step] ?? null;
 
   const canAdvance = () => {
     if (step === 0) return consentAccepted;
-    if (step === STEPS - 1) return reviewConfirmed;
+    if (step === totalSteps - 1) return reviewConfirmed;
     return true;
   };
 
   const handleNext = () => {
-    if (step < STEPS - 1) {
+    if (step < totalSteps - 1) {
       setStep((prev) => prev + 1);
+    } else {
+      void handleFinish();
     }
   };
 
@@ -115,7 +227,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   };
 
   const handleSkip = () => {
-    if (step < STEPS - 1) {
+    if (step < totalSteps - 1) {
       setStep((prev) => prev + 1);
     }
   };
@@ -137,115 +249,24 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
     }
   };
 
-  const stepContent = () => {
-    switch (step) {
-      case 0:
-        return (
-          <IntroStep
-            mode={mode}
-            localCacheEnabled={state.local_cache_enabled}
-            consentAccepted={consentAccepted}
-            onModeChange={(value: PersonalizationMode) =>
-              handleUpdate({ personalization_mode: value })
-            }
-            onConsentChange={setConsentAccepted}
-            onCacheToggle={(enabled) =>
-              handleUpdate({ local_cache_enabled: enabled })
-            }
-          />
-        );
-      case 1:
-        return (
-          <IdentityStep
-            timezone={timezone}
-            onTimezoneChange={setTimezone}
-            cadence={state.cadence}
-            onCadenceChange={(value: ReflectionCadence) =>
-              handleUpdate({ cadence: value })
-            }
-            mode={mode}
-          />
-        );
-      case 2:
-        return (
-          <GoalsStep
-            selectedGoals={state.goals}
-            onGoalsChange={(goals: GoalKey[]) => handleUpdate({ goals })}
-            goalOptions={GOAL_OPTIONS}
-            mode={mode}
-            extraGoal={state.extra_goal ?? ""}
-            onExtraGoalChange={(value) => handleUpdate({ extra_goal: value })}
-            // customGoals={state.custom_goals}
-            // onCustomGoalsChange={(goals) =>
-            //   handleUpdate({ custom_goals: goals })
-            // }
-          />
-        );
-      case 3:
-        return (
-          <WorkingStyleStep
-            learningStyle={state.learning_style}
-            sessionLength={state.session_length_minutes}
-            onLearningStyleChange={(value) =>
-              handleUpdate({ learning_style: value })
-            }
-            onSessionLengthChange={(value) =>
-              handleUpdate({
-                session_length_minutes:
-                  value as PersonalizationState["session_length_minutes"],
-              })
-            }
-            mode={mode}
-          />
-        );
-      case 4:
-        return (
-          <ToneStep
-            bluntness={state.bluntness}
-            languageIntensity={state.language_intensity}
-            loggingFormat={state.logging_format}
-            spiritualPrompts={state.spiritual_prompts}
-            onUpdate={(patch) => handleUpdate(patch)}
-            mode={mode}
-          />
-        );
-      case 5:
-        return (
-          <AnchorsStep
-            driftRule={state.drift_rule}
-            crisisCard={state.crisis_card ?? ""}
-            onDriftRuleChange={(value) => handleUpdate({ drift_rule: value })}
-            onCrisisCardChange={(value) => handleUpdate({ crisis_card: value })}
-            mode={mode}
-          />
-        );
-      case 6:
-      default:
-        return (
-          <ReviewStep
-            state={state}
-            timezone={timezone}
-            confirmed={reviewConfirmed}
-            onConfirmChange={setReviewConfirmed}
-          />
-        );
-    }
-  };
-
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.progressContainer}>
           <View style={styles.stepIndicator}>
             <Text style={styles.stepNumber}>{step + 1}</Text>
-            <Text style={styles.stepTotal}>/{STEPS}</Text>
+            <Text style={styles.stepTotal}>/{totalSteps}</Text>
           </View>
           <Text style={styles.progress}>Progress</Text>
           <View style={styles.progressBar}>
             <View
               style={[
                 styles.progressFill,
-                { width: `${((step + 1) / STEPS) * 100}%` },
+                {
+                  width: `${
+                    totalSteps > 0 ? ((step + 1) / totalSteps) * 100 : 0
+                  }%`,
+                },
               ]}
             />
           </View>
@@ -261,7 +282,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
         bounces={true}
         alwaysBounceVertical={false}
       >
-        {stepContent()}
+        {currentStep}
       </ScrollView>
 
       <View style={styles.footer}>
@@ -276,7 +297,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           >
             <Text style={styles.secondaryText}>Back</Text>
           </TouchableOpacity>
-          {step < STEPS - 1 && step !== 0 && (
+          {step < totalSteps - 1 && step !== 0 && (
             <TouchableOpacity
               onPress={handleSkip}
               style={styles.secondaryButton}
@@ -287,7 +308,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
         </View>
 
         <TouchableOpacity
-          onPress={step === STEPS - 1 ? handleFinish : handleNext}
+          onPress={handleNext}
           style={[
             styles.primaryButton,
             (!canAdvance() || isSubmitting) && styles.disabledButton,
@@ -295,7 +316,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           disabled={!canAdvance() || isSubmitting}
         >
           <Text style={styles.primaryText}>
-            {step === STEPS - 1 ? "Finish" : "Next"}
+            {step === totalSteps - 1 ? "Finish" : "Next"}
           </Text>
         </TouchableOpacity>
       </View>

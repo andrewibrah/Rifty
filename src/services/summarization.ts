@@ -6,6 +6,7 @@ import type {
   SummarizeEntryResult,
   GoalDetectionResult,
 } from '../types/mvp'
+import { isUUID } from '../utils/uuid'
 
 const MODEL_NAME = 'gpt-4o-mini' as const
 
@@ -268,6 +269,11 @@ export async function getEntrySummary(
 
   if (authError || !user) {
     throw new Error('User not authenticated')
+  }
+
+  if (!isUUID(entryId)) {
+    console.warn('[getEntrySummary] Skipping lookup for invalid entry id', entryId)
+    return null
   }
 
   const { data, error } = await supabase

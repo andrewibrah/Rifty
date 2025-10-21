@@ -27,6 +27,7 @@ import {
   ScrollView,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView, SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import type { Session } from "@supabase/supabase-js";
@@ -89,7 +90,6 @@ import CheckInBanner from "./src/components/CheckInBanner";
 import { getPendingCheckIn, completeCheckIn } from "./src/services/checkIns";
 import type { CheckIn } from "./src/types/mvp";
 
-const SPLASH_DURATION = 2500;
 const MIGRATION_FLAG =
   String(
     (Constants.expoConfig?.extra as Record<string, any> | undefined)
@@ -138,7 +138,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
   const {
     messages,
-    groupMessages,
+    messageGroups,
     sendMessage,
     retryMessage,
     clearMessages,
@@ -165,6 +165,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     useState<IntentReviewTicket | null>(null);
   const [showPersonalization, setShowPersonalization] = useState(false);
   const [pendingCheckIn, setPendingCheckIn] = useState<CheckIn | null>(null);
+  const lastCheckInRef = useRef<CheckIn | null>(null);
   const [activeCheckInId, setActiveCheckInId] = useState<string | null>(null);
   const [sessionInfo, setSessionInfo] = useState<StoredSession | null>(null);
   const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
@@ -202,14 +203,17 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         const raw = await AsyncStorage.getItem(CURRENT_SESSION_STORAGE_KEY);
         if (!raw) return null;
         const parsed = JSON.parse(raw) as StoredSession;
-        if (parsed && parsed.id && parsed.startedAt) {
-          return {
-            id: parsed.id,
-            startedAt: parsed.startedAt,
-            lastMessageAt: parsed.lastMessageAt,
-            messageCount: Number(parsed.messageCount ?? 0),
-          };
+      if (parsed && parsed.id && parsed.startedAt) {
+        const nextSession: StoredSession = {
+          id: parsed.id,
+          startedAt: parsed.startedAt,
+          messageCount: Number(parsed.messageCount ?? 0),
+        };
+        if (parsed.lastMessageAt) {
+          nextSession.lastMessageAt = parsed.lastMessageAt;
         }
+        return nextSession;
+      }
       } catch (error) {
         console.warn("[ChatSession] failed to load session", error);
       }
@@ -344,8 +348,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       const updated: StoredSession = {
         ...session,
         messageCount: Math.max(0, (session.messageCount ?? 0) + delta),
-        lastMessageAt: lastMessageIso ?? session.lastMessageAt,
       };
+      if (lastMessageIso) {
+        updated.lastMessageAt = lastMessageIso;
+      } else if (session.lastMessageAt) {
+        updated.lastMessageAt = session.lastMessageAt;
+      }
       sessionInfoRef.current = updated;
       setSessionInfo(updated);
       await saveSessionToStorage(updated);
@@ -424,6 +432,100 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     [incrementSessionMessageCount, personalization, saveStatsToStorage]
   );
 
+  const archiveConversation = useCallback(
+    async (options?: { reason?: "manual" | "auto"; endedAt?: Date }) => {
+      const currentSession = sessionInfoRef.current;
+      const endedAt = options?.endedAt ?? new Date();
+      const timezone = timezoneRef.current;
+      const snapshot: ChatMessage[] = JSON.parse(JSON.stringify(messages));
+      const messageCount = currentSession?.messageCount ?? snapshot.length;
+
+      if (messageCount === 0) {
+        sessionInfoRef.current = null;
+        setSessionInfo(null);
+        await saveSessionToStorage(null);
+        return null;
+      }
+
+      let metadata = await generateSessionMetadata(snapshot).catch(() => {
+        const fallbackSource = snapshot.find((msg) => msg.kind !== "bot") ??
+          snapshot[0];
+        const title = fallbackSource?.content
+          ? fallbackSource.content.slice(0, 40)
+          : "Reflection";
+        return {
+          title,
+          summary: "Conversation summary unavailable.",
+          confidence: 0.2,
+        };
+      });
+
+      if (!metadata.title || metadata.title.trim().length === 0) {
+        metadata = {
+          ...metadata,
+          title: "Reflection",
+        };
+      }
+
+      const record: MainHistoryRecord = {
+        id: currentSession?.id ?? generateUUID(),
+        timestamp: endedAt.toISOString(),
+        title: metadata.title,
+        summary: metadata.summary,
+        aiTitleConfidence: metadata.confidence,
+        messageCount,
+        messages: snapshot,
+      };
+
+      try {
+        const raw = await AsyncStorage.getItem(MAIN_HISTORY_STORAGE_KEY);
+        const history: MainHistoryRecord[] = raw ? JSON.parse(raw) : [];
+        const next = [record, ...history].slice(0, 50);
+        await AsyncStorage.setItem(
+          MAIN_HISTORY_STORAGE_KEY,
+          JSON.stringify(next)
+        );
+      } catch (error) {
+        console.error("Failed to archive conversation", error);
+      }
+
+      if (currentSession) {
+        try {
+          await updateChatSession(currentSession.id, {
+            endedAt: endedAt.toISOString(),
+            title: metadata.title,
+            summary: metadata.summary,
+            messageCount,
+            aiTitleConfidence: metadata.confidence,
+          });
+        } catch (error) {
+          console.warn("[ChatSession] finalize failed", error);
+        }
+      } else {
+        try {
+          await createChatSession({
+            id: record.id,
+            sessionDate: formatDateKey(endedAt, timezone),
+            startedAt: endedAt.toISOString(),
+            title: metadata.title,
+            summary: metadata.summary,
+            messageCount,
+            aiTitleConfidence: metadata.confidence,
+          });
+        } catch (error) {
+          console.warn("[ChatSession] backfill create failed", error);
+        }
+      }
+
+      sessionInfoRef.current = null;
+      setSessionInfo(null);
+      await saveSessionToStorage(null);
+
+      return record;
+    },
+    [messages, saveSessionToStorage]
+  );
+
   const maybeRotateSession = useCallback(
     async (timezone: string, forcedNow?: Date) => {
       const session = sessionInfoRef.current;
@@ -492,22 +594,22 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
     flameLoop.start();
 
-    const timer = setTimeout(() => {
-      Animated.timing(splashOpacity, {
-        toValue: 0,
-        duration: 400,
-        useNativeDriver: true,
-      }).start(() => {
-        setIsSplashVisible(false);
-        flameLoop.stop();
-      });
-    }, SPLASH_DURATION);
-
     return () => {
-      clearTimeout(timer);
       flameLoop.stop();
     };
-  }, [flameScale, flameTranslate, splashOpacity]);
+  }, [flameScale, flameTranslate]);
+
+  useEffect(() => {
+    if (!personalization || !isSplashVisible) return;
+
+    Animated.timing(splashOpacity, {
+      toValue: 0,
+      duration: 500,
+      useNativeDriver: true,
+    }).start(() => {
+      setIsSplashVisible(false);
+    });
+  }, [isSplashVisible, personalization, splashOpacity]);
 
   useEffect(() => {
     if (!personalization) return;
@@ -620,11 +722,33 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       if (activeCheckInId) {
         try {
           await completeCheckIn(activeCheckInId, { response: trimmed });
+          setActiveCheckInId(null);
+          lastCheckInRef.current = null;
+          loadPendingCheckIn();
         } catch (checkInError) {
           console.warn("[CheckIn] completion failed", checkInError);
+          const previousCheckIn = lastCheckInRef.current;
+          if (previousCheckIn) {
+            setPendingCheckIn(previousCheckIn);
+          }
+          setActiveCheckInId(null);
+          Alert.alert(
+            "Check-in Failed",
+            "Could not save your response. Try again?",
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Retry",
+                onPress: () => {
+                  if (previousCheckIn) {
+                    setPendingCheckIn(previousCheckIn);
+                    handleRespondCheckIn();
+                  }
+                },
+              },
+            ]
+          );
         }
-        setActiveCheckInId(null);
-        loadPendingCheckIn();
       }
 
       requestAnimationFrame(() => {
@@ -666,7 +790,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     [menuState]
   );
 
-  const messageGroups = groupMessages(messages);
 
   const renderItem = ({
     item: group,
@@ -693,99 +816,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   const [isGestureActive, setIsGestureActive] = useState(false);
   const [gestureProgress, setGestureProgress] = useState(0);
 
-  const archiveConversation = useCallback(
-    async (options?: { reason?: "manual" | "auto"; endedAt?: Date }) => {
-      const currentSession = sessionInfoRef.current;
-      const endedAt = options?.endedAt ?? new Date();
-      const timezone = timezoneRef.current;
-      const snapshot: ChatMessage[] = JSON.parse(JSON.stringify(messages));
-      const messageCount = currentSession?.messageCount ?? snapshot.length;
-
-      if (messageCount === 0) {
-        sessionInfoRef.current = null;
-        setSessionInfo(null);
-        await saveSessionToStorage(null);
-        return null;
-      }
-
-      let metadata = await generateSessionMetadata(snapshot).catch(() => {
-        const fallbackSource =
-          snapshot.find((msg) => msg.kind !== "bot") ?? snapshot[0];
-        const title = fallbackSource?.content
-          ? fallbackSource.content.slice(0, 40)
-          : "Reflection";
-        return {
-          title,
-          summary: "Conversation summary unavailable.",
-          confidence: 0.2,
-        };
-      });
-
-      if (!metadata.title || metadata.title.trim().length === 0) {
-        metadata = {
-          ...metadata,
-          title: "Reflection",
-        };
-      }
-
-      const record: MainHistoryRecord = {
-        id: currentSession?.id ?? generateUUID(),
-        timestamp: endedAt.toISOString(),
-        title: metadata.title,
-        summary: metadata.summary,
-        aiTitleConfidence: metadata.confidence,
-        messageCount,
-        messages: snapshot,
-      };
-
-      try {
-        const raw = await AsyncStorage.getItem(MAIN_HISTORY_STORAGE_KEY);
-        const history: MainHistoryRecord[] = raw ? JSON.parse(raw) : [];
-        const next = [record, ...history].slice(0, 50);
-        await AsyncStorage.setItem(
-          MAIN_HISTORY_STORAGE_KEY,
-          JSON.stringify(next)
-        );
-      } catch (error) {
-        console.error("Failed to archive conversation", error);
-      }
-
-      if (currentSession) {
-        try {
-          await updateChatSession(currentSession.id, {
-            endedAt: endedAt.toISOString(),
-            title: metadata.title,
-            summary: metadata.summary,
-            messageCount,
-            aiTitleConfidence: metadata.confidence,
-          });
-        } catch (error) {
-          console.warn("[ChatSession] finalize failed", error);
-        }
-      } else {
-        try {
-          await createChatSession({
-            id: record.id,
-            sessionDate: formatDateKey(endedAt, timezone),
-            startedAt: endedAt.toISOString(),
-            title: metadata.title,
-            summary: metadata.summary,
-            messageCount,
-            aiTitleConfidence: metadata.confidence,
-          });
-        } catch (error) {
-          console.warn("[ChatSession] backfill create failed", error);
-        }
-      }
-
-      sessionInfoRef.current = null;
-      setSessionInfo(null);
-      await saveSessionToStorage(null);
-
-      return record;
-    },
-    [messages, saveSessionToStorage]
-  );
 
   // Handle clear chat with confirmation
   const handleClearChat = useCallback(() => {
@@ -994,6 +1024,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
   const handleRespondCheckIn = useCallback(() => {
     if (!pendingCheckIn) return;
+    lastCheckInRef.current = pendingCheckIn;
     setActiveCheckInId(pendingCheckIn.id);
     setContent(`${pendingCheckIn.prompt} `);
     setPendingCheckIn(null);
@@ -1002,6 +1033,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   const handleDismissCheckIn = useCallback(() => {
     setPendingCheckIn(null);
   }, []);
+
+
 
   if (currentScreen === "settings") {
     return (

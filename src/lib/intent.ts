@@ -48,7 +48,7 @@ export async function predictIntent(
     return buildPredictionFromNative(nativeResult);
   } catch (error) {
     console.warn("[intent] native prediction failed", error);
-    const fallback = getIntentDefinition("Journal Entry");
+    const fallback = getIntentDefinition("Conversational");
     return {
       ...fallback,
       rawLabel: fallback.label,

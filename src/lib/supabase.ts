@@ -70,3 +70,6 @@ export const supabase = createClient(resolvedSupabaseUrl, resolvedSupabaseAnonKe
     storageKey: 'riflett.supabase.auth',
   },
 })
+
+export const SUPABASE_URL = resolvedSupabaseUrl
+export const SUPABASE_ANON_KEY = resolvedSupabaseAnonKey

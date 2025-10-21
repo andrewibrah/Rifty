@@ -5,7 +5,7 @@ import {
   scheduleDailyCheckIns,
   scheduleWeeklyCheckIn,
 } from '../services/checkIns'
-import type { CheckIn } from '../types/mvp'
+import type { CheckIn, CompleteCheckInParams } from '../types/mvp'
 
 export const useCheckIns = () => {
   const [pendingCheckIn, setPendingCheckIn] = useState<CheckIn | null>(null)
@@ -35,10 +35,13 @@ export const useCheckIns = () => {
 
       setLoading(true)
       try {
-        await completeCheckIn(pendingCheckIn.id, {
+        const payload: CompleteCheckInParams = {
           response,
-          response_entry_id: entryId,
-        })
+        }
+        if (entryId) {
+          payload.response_entry_id = entryId
+        }
+        await completeCheckIn(pendingCheckIn.id, payload)
         setPendingCheckIn(null)
         // Schedule next check-ins if needed
         await scheduleDailyCheckIns()

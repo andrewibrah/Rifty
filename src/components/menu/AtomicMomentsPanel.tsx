@@ -36,10 +36,11 @@ const AtomicMomentsPanel: React.FC<AtomicMomentsPanelProps> = ({ onClose }) => {
     setLoading(true);
     setError(null);
     try {
-      const results = await searchAtomicMoments({
-        query: searchTerm,
-        limit: DEFAULT_LIMIT,
-      });
+      const params =
+        typeof searchTerm === "string" && searchTerm.length > 0
+          ? { query: searchTerm, limit: DEFAULT_LIMIT }
+          : { limit: DEFAULT_LIMIT };
+      const results = await searchAtomicMoments(params);
       setMoments(results);
     } catch (err) {
       console.error("[AtomicMomentsPanel] fetch failed", err);
@@ -55,7 +56,8 @@ const AtomicMomentsPanel: React.FC<AtomicMomentsPanelProps> = ({ onClose }) => {
 
   useEffect(() => {
     const timeout = setTimeout(() => {
-      load(query.trim() || undefined);
+      const trimmed = query.trim();
+      load(trimmed.length > 0 ? trimmed : undefined);
     }, 350);
     return () => clearTimeout(timeout);
   }, [query, load]);

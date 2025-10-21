@@ -75,6 +75,7 @@ export const radii = {
   sm: 12,
   md: 16,
   lg: 24,
+  xl: 32,
   pill: 999,
 };
 
@@ -121,6 +122,30 @@ export const typography = {
     fontWeight: "500" as const,
     letterSpacing: 0.25,
     lineHeight: 1.3,
+  },
+  small: {
+    fontFamily: Platform.OS === "ios" ? "SF Pro Text" : "Roboto",
+    fontWeight: "500" as const,
+    letterSpacing: 0.25,
+    lineHeight: 1.25,
+  },
+  h1: {
+    fontFamily: Platform.OS === "ios" ? "SF Pro Display" : "Roboto",
+    fontWeight: "900" as const,
+    letterSpacing: -0.5,
+    lineHeight: 1.15,
+  },
+  h2: {
+    fontFamily: Platform.OS === "ios" ? "SF Pro Display" : "Roboto",
+    fontWeight: "800" as const,
+    letterSpacing: -0.35,
+    lineHeight: 1.2,
+  },
+  h3: {
+    fontFamily: Platform.OS === "ios" ? "SF Pro Display" : "Roboto",
+    fontWeight: "700" as const,
+    letterSpacing: -0.2,
+    lineHeight: 1.25,
   },
 };
 

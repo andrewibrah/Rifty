@@ -1,17 +1,15 @@
 export type IntentLabelId =
-  | 'journal_entry'
-  | 'goal_create'
-  | 'goal_check_in'
-  | 'schedule_create'
-  | 'reminder_set'
-  | 'reflection_request'
-  | 'settings_change'
-  | 'insight_link';
+  | 'conversational'
+  | 'entry_create'
+  | 'entry_discuss'
+  | 'entry_append'
+  | 'command'
+  | 'search_query';
 
 export interface IntentLabelDefinition {
   id: IntentLabelId;
   display: string;
-  subsystem: 'entries' | 'goals' | 'schedule' | 'user_config' | 'knowledge';
+  subsystem: 'entries' | 'user_config' | 'knowledge';
 }
 
 export interface RuntimeIntentModel {

@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { isUUID } from '../utils/uuid'
 
 type Nullable<T> = T | null
 
@@ -164,6 +165,10 @@ export async function updateJournalEntry(
 ): Promise<RemoteJournalEntry> {
   const user = await requireUser()
 
+  if (!isUUID(entryId)) {
+    throw new Error('Invalid entry id')
+  }
+
   const payload: Record<string, any> = {}
   if (updates.content !== undefined) payload.content = updates.content
   if (updates.metadata !== undefined) payload.metadata = updates.metadata
@@ -188,6 +193,10 @@ export async function updateJournalEntry(
 
 export async function deleteJournalEntry(id: string): Promise<void> {
   const user = await requireUser()
+
+  if (!isUUID(id)) {
+    throw new Error('Invalid entry id')
+  }
 
   const { error } = await supabase
     .from('entries')
@@ -235,6 +244,11 @@ export async function logIntentAudit(params: {
 }): Promise<void> {
   const user = await requireUser()
 
+  if (!isUUID(params.entryId)) {
+    console.warn('[logIntentAudit] Skipping audit insert for invalid entry id', params.entryId)
+    return
+  }
+
   const { error } = await supabase.from('intent_audits').insert({
     user_id: user.id,
     entry_id: params.entryId,
@@ -252,6 +266,11 @@ export async function getJournalEntryById(
   id: string
 ): Promise<RemoteJournalEntry | null> {
   const user = await requireUser()
+
+  if (!isUUID(id)) {
+    console.warn('[getJournalEntryById] Skipping lookup for invalid entry id', id)
+    return null
+  }
 
   const { data, error } = await supabase
     .from('entries')
