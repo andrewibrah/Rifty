@@ -20,11 +20,7 @@ import type { RemoteJournalEntry, EntryType } from "../../services/data";
 import { appendMessage, updateJournalEntry } from "../../services/data";
 import { supabase } from "../../lib/supabase";
 import { generateAIResponse, formatAnnotationLabel } from "../../services/ai";
-import { predictIntent, isEntryChatAllowed } from "../../lib/intent";
-import type {
-  IntentPredictionResult,
-  ProcessingStep,
-} from "../../types/intent";
+import type { ProcessingStep } from "../../types/intent";
 import type { ProcessingStepId } from "../../types/intent";
 import { getColors, radii, spacing, typography, shadows } from "../../theme";
 import { useTheme } from "../../contexts/ThemeContext";
@@ -52,7 +48,6 @@ interface MenuEntryChatProps {
 type ComposerMode = "note" | "ai";
 
 const createProcessingTimeline = (): ProcessingStep[] => [
-  { id: "ml_detection", label: "ML prediction", status: "pending" },
   { id: "knowledge_search", label: "Knowledge base", status: "pending" },
   { id: "openai_request", label: "OpenAI request", status: "pending" },
   { id: "openai_response", label: "OpenAI received", status: "pending" },
@@ -130,8 +125,6 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [isWorkingWithAI, setIsWorkingWithAI] = useState(false);
   const [processingSteps, setProcessingSteps] = useState<ProcessingStep[]>([]);
-  const [predictedIntent, setPredictedIntent] =
-    useState<IntentPredictionResult | null>(null);
   const [isNoteSelectionMode, setIsNoteSelectionMode] = useState(false);
   const [selectedNotes, setSelectedNotes] = useState<Set<string>>(new Set());
   const [emotionsScrollX, setEmotionsScrollX] = useState(0);
@@ -143,7 +136,6 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     onModeChange?.(composerMode);
     if (composerMode === "note") {
       setProcessingSteps([]);
-      setPredictedIntent(null);
     }
   }, [composerMode, onModeChange]);
 
@@ -251,42 +243,12 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     };
 
     try {
-      setTimeline("ml_detection", "running", "Analyzing");
-      const prediction = await predictIntent(trimmed);
-      setPredictedIntent(prediction);
-
-      setTimeline(
-        "ml_detection",
-        "done",
-        `${prediction.rawLabel} ${(prediction.confidence * 100).toFixed(1)}%`
-      );
-
-      if (!isEntryChatAllowed(prediction.id)) {
-        setTimeline("knowledge_search", "skipped", "Redirect required");
-        setTimeline("openai_request", "skipped", "Use main chat");
-        setTimeline("openai_response", "skipped", "Intent restricted");
-        onErrorUpdate(
-          "This intent is managed from Main Chat. Switch surfaces to continue."
-        );
-        Alert.alert(
-          "Open Main Chat",
-          "This type of request is routed through the main chat so Riflett can manage linked data."
-        );
-        return;
-      }
-
+      setTimeline("knowledge_search", "running", "Preparing entry context");
       setTimeline("knowledge_search", "done", "Entry context ready");
 
       const userMessage = await appendMessage(entryId, "user", trimmed, {
         channel: "ai",
         messageKind: "aiQuestion",
-        intent: {
-          id: prediction.id,
-          label: prediction.label,
-          rawLabel: prediction.rawLabel,
-          confidence: prediction.confidence,
-          subsystem: prediction.subsystem,
-        },
         processingTimeline: timeline,
       });
 
@@ -298,12 +260,6 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         content: userMessage.content,
         created_at: userMessage.created_at,
         metadata: {
-          intent: {
-            id: prediction.id,
-            label: prediction.label,
-            confidence: prediction.confidence,
-            subsystem: prediction.subsystem,
-          },
           processingTimeline: timeline,
         },
       };
@@ -333,12 +289,6 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         annotations: updatedAnnotations,
         userMessage: trimmed,
         entryType: entry.type,
-        intentContext: {
-          id: prediction.id,
-          label: prediction.label,
-          confidence: prediction.confidence,
-          subsystem: prediction.subsystem,
-        },
       });
 
       setTimeline("openai_request", "done", "Prompt dispatched");
@@ -353,13 +303,6 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
           messageKind: "aiReply",
           learned: aiResult.learned,
           ethical: aiResult.ethical,
-          intent: {
-            id: prediction.id,
-            label: prediction.label,
-            rawLabel: prediction.rawLabel,
-            confidence: prediction.confidence,
-            subsystem: prediction.subsystem,
-          },
           processingTimeline: timeline,
         }
       );
@@ -371,17 +314,12 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         channel: "ai",
         content: botMessage.content,
         created_at: botMessage.created_at,
-        metadata: {
-          learned: aiResult.learned,
-          ethical: aiResult.ethical,
-          intent: {
-            id: prediction.id,
-            label: prediction.label,
-            confidence: prediction.confidence,
-          },
-          processingTimeline: timeline,
-        },
-      };
+      metadata: {
+        learned: aiResult.learned,
+        ethical: aiResult.ethical,
+        processingTimeline: timeline,
+      },
+    };
 
       // Remove thinking message and add actual response
       const finalAnnotations = updatedAnnotations.filter(
@@ -1251,13 +1189,6 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
               </TouchableOpacity>
             </View>
           </View>
-          {composerMode === "ai" && predictedIntent && (
-            <Text style={styles.intentSummary}>
-              {`Intent: ${predictedIntent.label} (${Math.round(
-                predictedIntent.confidence * 100
-              )}% confidence)`}
-            </Text>
-          )}
         </View>
       )}
     </KeyboardAvoidingView>
@@ -1705,12 +1636,6 @@ const createStyles = (colors: any, insets: any) =>
     noteSendButtonDisabled: {
       borderColor: colors.borderLight,
       backgroundColor: colors.surface,
-    },
-    intentSummary: {
-      marginTop: spacing.sm,
-      ...typography.caption,
-      fontSize: 12,
-      color: colors.textSecondary,
     },
     processingRow: {
       flexDirection: "row",

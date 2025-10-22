@@ -260,11 +260,6 @@ const successMessages: Record<EntryType, string> = {
 
 const processingTemplate = (): ProcessingStep[] => [
   {
-    id: "ml_detection",
-    label: "ML prediction",
-    status: "pending",
-  },
-  {
     id: "knowledge_search",
     label: "Knowledge base",
     status: "pending",
@@ -660,7 +655,7 @@ export const useChatState = (
           );
         };
 
-        advanceTimeline("ml_detection", "running", "Analyzing intent");
+        advanceTimeline("knowledge_search", "running", "Analyzing intent");
 
         let createdEntryId: string | null = null;
 
@@ -708,20 +703,13 @@ export const useChatState = (
             ContextWindow.refreshEntry(targetEntryId, targetEntryType ?? 'unknown');
           }
 
-          advanceTimeline(
-            "ml_detection",
-            "done",
-            `${intentMeta.displayLabel} ${(intentMeta.confidence * 100).toFixed(
-              1
-            )}%`
-          );
-
           const matchCount = intentPayload.memoryMatches.length;
-          advanceTimeline(
-            "knowledge_search",
-            matchCount > 0 ? "done" : "skipped",
-            matchCount > 0 ? `${matchCount} memory matches` : "No matches"
-          );
+          const classificationDetail = `${intentMeta.displayLabel} ${(
+            intentMeta.confidence * 100
+          ).toFixed(1)}%`;
+          const matchDetail =
+            matchCount > 0 ? `${matchCount} memory matches` : "No memory matches";
+          advanceTimeline("knowledge_search", "done", `${classificationDetail} • ${matchDetail}`);
 
           let planner: PlannerResponse | null = null;
           try {

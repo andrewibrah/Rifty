@@ -12,7 +12,6 @@ export type ProcessingStatus =
   | "skipped";
 
 export type ProcessingStepId =
-  | "ml_detection"
   | "knowledge_search"
   | "openai_request"
   | "openai_response";

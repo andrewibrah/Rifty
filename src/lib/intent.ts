@@ -6,10 +6,7 @@ import {
 } from "../constants/intents";
 import type { EntryType } from "../services/data";
 import type { IntentPredictionResult } from "../types/intent";
-import {
-  predictIntent as nativePredictIntent,
-  type NativeIntentResult,
-} from "../native/intent";
+import type { NativeIntentResult } from "../native/intent";
 
 const clampConfidence = (value: number): number =>
   Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
@@ -38,24 +35,6 @@ export function buildPredictionFromNative(
     confidence: clampConfidence(nativeResult.confidence),
     probabilities,
   };
-}
-
-export async function predictIntent(
-  text: string
-): Promise<IntentPredictionResult> {
-  try {
-    const nativeResult = await nativePredictIntent(text);
-    return buildPredictionFromNative(nativeResult);
-  } catch (error) {
-    console.warn("[intent] native prediction failed", error);
-    const fallback = getIntentDefinition("Conversational");
-    return {
-      ...fallback,
-      rawLabel: fallback.label,
-      confidence: 0,
-      probabilities: { [fallback.label]: 1 },
-    };
-  }
 }
 
 export function isEntryChatAllowed(intent: AppIntent): boolean {
