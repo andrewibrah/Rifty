@@ -17,6 +17,12 @@ const SUPABASE_ANON_KEY =
   process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
   process.env.SUPABASE_ANON_KEY ??
   "";
+const FEATURE_MAINCHAT_REBRAND =
+  (process.env.EXPO_PUBLIC_FEATURE_MAINCHAT_REBRAND ??
+    process.env.FEATURE_MAINCHAT_REBRAND ??
+    "false")
+    .toLowerCase()
+    .trim() === "true";
 const MIGRATION_FLAG =
   (process.env.MIGRATION_2025_10_REMOVE_LOCAL_DB ?? "false")
     .toLowerCase()
@@ -44,6 +50,7 @@ const config: ExpoConfig = {
     EXPO_PUBLIC_OPENAI_API_KEY: process.env.EXPO_PUBLIC_OPENAI_API_KEY,
     SUPABASE_URL,
     SUPABASE_ANON_KEY,
+    FEATURE_MAINCHAT_REBRAND,
     MIGRATION_2025_10_REMOVE_LOCAL_DB: MIGRATION_FLAG,
   },
   android: {

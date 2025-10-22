@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import { resolveOpenAIApiKey } from '@/services/ai';
 import type { EnrichedPayload, PlannerResponse } from '@/agent/types';
+import type { GoalContextItem } from '@/types/goal';
 import { EdgeCache } from '@/agent/cache';
 
 export interface PlannerResult {
@@ -8,8 +9,9 @@ export interface PlannerResult {
   raw: any;
 }
 
-const PLANNER_SYSTEM_PROMPT = `You are Riflett’s planner. Always return JSON matching the supplied schema.
-If unsure, ask exactly one clarifying question in the ask field, else leave it null.`;
+const PLANNER_SYSTEM_PROMPT = `Planner chooses tools: goal.create|goal.update|schedule.create|journal.append|reflect.mirror.
+Provided state includes structured goals, schedule windows, and constraints.
+Output JSON is schema-enforced and idempotent. Never hallucinate IDs.`;
 
 const ACTION_SCHEMA = {
   type: 'object',
@@ -57,6 +59,27 @@ const resolveModel = (): string => {
   return configured || 'gpt-4o-mini';
 };
 
+const summarizeGoalContext = (goals?: GoalContextItem[] | null): string => {
+  if (!goals || goals.length === 0) {
+    return 'None';
+  }
+
+  const compact = goals.map((goal) => ({
+    id: goal.id,
+    title: goal.title,
+    status: goal.status,
+    priority: Number(goal.priority_score ?? 0).toFixed(2),
+    current_step: goal.current_step,
+    next_micro_steps: goal.micro_steps
+      .filter((step) => !step.completed)
+      .slice(0, 3)
+      .map((step) => step.description),
+    conflicts: goal.conflicts,
+  }));
+
+  return JSON.stringify(compact, null, 2);
+};
+
 const buildPrompt = (payload: EnrichedPayload): string => {
   const intent = payload.intent;
   const context = payload.contextSnippets.join('\n---\n');
@@ -64,6 +87,10 @@ const buildPrompt = (payload: EnrichedPayload): string => {
   const probability = intent.confidence.toFixed(2);
   const secondary = intent.secondBest && intent.secondConfidence
     ? `\nSecondary intent: ${intent.secondBest} (${intent.secondConfidence?.toFixed(2)})`
+    : '';
+
+  const goalSection = payload.goalContext && payload.goalContext.length
+    ? `\n\n[GOALS]\n${summarizeGoalContext(payload.goalContext)}`
     : '';
 
   return `"""
@@ -80,7 +107,7 @@ ${context || 'n/a'}
 ${payload.userText}
 
 [USER_CONFIG]
-${JSON.stringify(payload.userConfig ?? {}, null, 2)}
+${JSON.stringify(payload.userConfig ?? {}, null, 2)}${goalSection}
 """`;
 };
 

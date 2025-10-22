@@ -1,9 +1,26 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { embedText, l2Normalize } from '@/agent/embeddings';
+import { supabase } from '@/lib/supabase';
+import { getOperatingPicture, ragSearch } from '@/services/memory';
+import type { OperatingPicture, RagResult } from '@/services/memory';
+import type { RoutedIntent } from '@/agent/types';
 
 const SQLITE_DB_NAME = 'riflett-memory.db';
 const STORAGE_KEY = 'riflett_memory_store';
 const MAX_CACHED_ROWS = 512;
+const REMOTE_BRIEF_LIMIT = 9;
+
+const resolveUserId = async (): Promise<string | null> => {
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  if (error) {
+    console.warn('[memory] resolveUserId failed', error);
+    return null;
+  }
+  return user?.id ?? null;
+};
 
 type SQLiteResultSet = {
   rows: {
@@ -74,7 +91,40 @@ interface MemoryRow {
   embedding: number[];
 }
 
-export type MemoryKind = 'entry' | 'goal' | 'event' | 'pref';
+const mapKindsToRag = (kinds: string[]): RagKind[] => {
+  const set = new Set(kinds.map((kind) => kind.toLowerCase()))
+  const mapped: RagKind[] = []
+  if (set.has('entry') || set.has('journal') || set.has('pref')) {
+    mapped.push('entry')
+  }
+  if (set.has('goal')) {
+    mapped.push('goal')
+  }
+  if (set.has('schedule') || set.has('event')) {
+    mapped.push('schedule')
+  }
+  return mapped
+}
+
+const inferScopeFromIntent = (intent: RoutedIntent | null | undefined): RagScopeInput => {
+  if (!intent) return 'all'
+  const label = intent.label?.toLowerCase() ?? ''
+  const scopes: RagKind[] = []
+  if (label.includes('goal')) {
+    scopes.push('goal')
+  }
+  if (label.includes('schedule') || label.includes('calendar')) {
+    scopes.push('schedule')
+  }
+  if (scopes.length === 0 || label.includes('journal') || label.includes('reflect')) {
+    scopes.push('entry')
+  }
+  return scopes.length ? scopes : 'all'
+}
+
+export type MemoryKind = 'entry' | 'goal' | 'event' | 'pref' | 'schedule';
+type RagKind = 'entry' | 'goal' | 'schedule';
+type RagScopeInput = RagKind | RagKind[] | 'all';
 
 export interface MemoryRecord extends MemoryRow {
   score: number;
@@ -336,12 +386,64 @@ const cosineScores = (query: number[], rows: MemoryRow[]): MemoryRecord[] => {
 export const Memory = {
   async searchTopN(options: SearchOptions): Promise<MemoryRecord[]> {
     await ensureInitialized();
-    const kinds = options.kinds.map((kind) => kind.toLowerCase());
     const topK = Math.max(1, Math.min(options.topK || 5, 20));
+    const userId = await resolveUserId();
+    if (userId) {
+      try {
+        const scopeKinds = mapKindsToRag(options.kinds);
+        const ragScope = scopeKinds.length ? scopeKinds : 'all';
+        const ragResults = await ragSearch(
+          userId,
+          options.query,
+          ragScope,
+          { limit: topK }
+        );
+        if (ragResults.length) {
+          const nowTs = Date.now();
+          const remoteRecords: MemoryRecord[] = [];
+          for (const [index, result] of ragResults.entries()) {
+            const text = result.snippet ?? '';
+            let embedding: number[] = [];
+            try {
+              embedding = await embedText(text);
+            } catch (error) {
+              console.warn('[memory] embedding cache failure', error);
+            }
+            const record: MemoryRecord = {
+              id: `${result.kind}:${result.id}`,
+              kind: (result.kind as MemoryKind) ?? 'entry',
+              text,
+              ts: nowTs - index,
+              embedding,
+              score: result.score,
+            };
+            remoteRecords.push(record);
+            try {
+              await Memory.upsert({
+                id: record.id,
+                kind: record.kind,
+                text: record.text,
+                ts: record.ts,
+                embedding: record.embedding,
+              });
+            } catch (error) {
+              console.warn('[memory] remote cache upsert failed', error);
+            }
+          }
+          return remoteRecords.slice(0, topK);
+        }
+      } catch (error) {
+        console.warn('[memory] remote search failed, falling back', error);
+      }
+    }
+
+    const kinds = options.kinds.map((kind) => kind.toLowerCase());
     const queryVector = await embedText(options.query);
 
     if (sqliteReady && sqliteDb) {
-      const placeholders = kinds.map(() => '?').join(',') || '?';
+      const placeholders = kinds.length
+        ? kinds.map(() => '?').join(',')
+        : '?';
       const params = kinds.length ? kinds : ['entry'];
       const result = await executeSql(
         `SELECT id, kind, text, ts, embedding FROM memory WHERE kind IN (${placeholders}) ORDER BY ts DESC LIMIT 512`,
@@ -366,6 +468,68 @@ export const Memory = {
     );
 
     return cosineScores(queryVector, rows).slice(0, topK);
+  },
+
+  async getBrief(
+    uid: string | null,
+    intent: RoutedIntent,
+    query: string,
+    options: { limit?: number } = {}
+  ): Promise<{
+    operatingPicture: OperatingPicture;
+    rag: RagResult[];
+    memoryRecords: MemoryRecord[];
+  }> {
+    await ensureInitialized();
+    const userId = uid ?? (await resolveUserId());
+    if (!userId) {
+      throw new Error('User not authenticated');
+    }
+
+    const limit = Math.max(3, Math.min(options.limit ?? REMOTE_BRIEF_LIMIT, REMOTE_BRIEF_LIMIT));
+    const [operatingPicture, ragResults] = await Promise.all([
+      getOperatingPicture(userId),
+      ragSearch(userId, query, inferScopeFromIntent(intent), { limit }),
+    ]);
+
+    const memoryRecords: MemoryRecord[] = [];
+    const nowTs = Date.now();
+
+    for (const [index, result] of ragResults.entries()) {
+      const text = result.snippet ?? '';
+      let embedding: number[] = [];
+      try {
+        embedding = await embedText(text);
+      } catch (error) {
+        console.warn('[memory] brief embedding failed', error);
+      }
+      const record: MemoryRecord = {
+        id: `${result.kind}:${result.id}`,
+        kind: (result.kind as MemoryKind) ?? 'entry',
+        text,
+        ts: nowTs - index,
+        embedding,
+        score: result.score,
+      };
+      memoryRecords.push(record);
+      try {
+        await Memory.upsert({
+          id: record.id,
+          kind: record.kind,
+          text: record.text,
+          ts: record.ts,
+          embedding: record.embedding,
+        });
+      } catch (error) {
+        console.warn('[memory] brief cache upsert failed', error);
+      }
+    }
+
+    return {
+      operatingPicture,
+      rag: ragResults,
+      memoryRecords,
+    };
   },
 
   async upsert(options: UpsertOptions): Promise<void> {

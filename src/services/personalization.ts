@@ -1,24 +1,165 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import {
+  type CachedPersonalization,
   type PersonalizationBundle,
   type PersonalizationMode,
+  type PersonalizationRuntime,
   type PersonalizationState,
   type PersonaSignalPayload,
+  type PersonaTag,
+  type PrivacyGateMap,
   type ProfileSnapshot,
   type ReflectionCadence,
   type UserSettings,
-  type CachedPersonalization,
-  type PersonaTag,
 } from "../types/personalization";
 import { computePersonaTag } from "../utils/persona";
 
 const CACHE_KEY = "@reflectify:user_settings";
+const PRIVACY_GATES_FEATURE_KEY = "privacy_gates";
+const CRISIS_RULES_FEATURE_KEY = "crisis_rules";
+
+const DEFAULT_PRIVACY_GATES: PrivacyGateMap = {};
+const DEFAULT_CRISIS_RULES: Record<string, unknown> = {};
 
 const parseIsoDate = (value?: string | null) =>
   value ? new Date(value).getTime() : 0;
 
 const nowIso = () => new Date().toISOString();
+
+const clonePrivacyMap = (map: PrivacyGateMap): PrivacyGateMap =>
+  Object.assign({}, map);
+
+const normalizePrivacyGates = (value: unknown): PrivacyGateMap => {
+  if (!value) {
+    return clonePrivacyMap(DEFAULT_PRIVACY_GATES);
+  }
+
+  const gates: PrivacyGateMap = {};
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === "string" && item.trim()) {
+        gates[item.trim()] = true;
+        continue;
+      }
+      if (item && typeof item === "object") {
+        const raw = item as Record<string, unknown>;
+        const key =
+          typeof raw.key === "string"
+            ? raw.key
+            : typeof raw.id === "string"
+            ? raw.id
+            : null;
+        if (!key) continue;
+        const allowed =
+          typeof raw.allowed === "boolean"
+            ? raw.allowed
+            : typeof raw.value === "boolean"
+            ? raw.value
+            : true;
+        gates[key] = allowed;
+      }
+    }
+    return Object.keys(gates).length > 0
+      ? gates
+      : clonePrivacyMap(DEFAULT_PRIVACY_GATES);
+  }
+
+  if (typeof value === "object") {
+    for (const [key, raw] of Object.entries(
+      value as Record<string, unknown>
+    )) {
+      if (!key) continue;
+      let allowed = true;
+      if (typeof raw === "boolean") {
+        allowed = raw;
+      } else if (raw && typeof raw === "object") {
+        const nested = raw as Record<string, unknown>;
+        if (typeof nested.allowed === "boolean") {
+          allowed = nested.allowed;
+        } else if (typeof nested.denied === "boolean") {
+          allowed = !nested.denied;
+        }
+      }
+      gates[key] = allowed;
+    }
+    return Object.keys(gates).length > 0
+      ? gates
+      : clonePrivacyMap(DEFAULT_PRIVACY_GATES);
+  }
+
+  return clonePrivacyMap(DEFAULT_PRIVACY_GATES);
+};
+
+const normalizeCrisisRules = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== "object") {
+    return { ...DEFAULT_CRISIS_RULES };
+  }
+  return { ...(value as Record<string, unknown>) };
+};
+
+const buildRuntimePreferences = (
+  settings: UserSettings | null,
+  featureMap: Record<string, unknown>
+): PersonalizationRuntime => {
+  const privacyRaw = featureMap[PRIVACY_GATES_FEATURE_KEY];
+  const crisisRaw = featureMap[CRISIS_RULES_FEATURE_KEY];
+
+  return {
+    user_settings: settings,
+    persona: settings?.persona_tag ?? null,
+    cadence: settings?.cadence ?? "none",
+    tone: settings?.language_intensity ?? "neutral",
+    spiritual_on: Boolean(settings?.spiritual_prompts),
+    bluntness: settings?.bluntness ?? 5,
+    privacy_gates: normalizePrivacyGates(privacyRaw),
+    crisis_rules: normalizeCrisisRules(crisisRaw),
+    resolved_at: nowIso(),
+  };
+};
+
+const buildFallbackProfile = (userId: string): ProfileSnapshot => {
+  const timezone =
+    Intl.DateTimeFormat().resolvedOptions().timeZone?.trim() ?? "UTC";
+  return {
+    id: userId,
+    timezone,
+    onboarding_completed: false,
+    updated_at: nowIso(),
+    missed_day_count: 0,
+    current_streak: 0,
+    last_message_at: null,
+  };
+};
+
+const fetchFeatureMap = async (
+  userId: string
+): Promise<Record<string, unknown>> => {
+  try {
+    const { data, error } = await supabase
+      .from("features")
+      .select("key, value_json")
+      .eq("user_id", userId);
+
+    if (error) {
+      console.warn("[personalization] feature fetch failed", error);
+      return {};
+    }
+
+    const map: Record<string, unknown> = {};
+    for (const row of data ?? []) {
+      if (row && typeof row.key === "string") {
+        map[row.key] = row.value_json ?? {};
+      }
+    }
+    return map;
+  } catch (error) {
+    console.warn("[personalization] feature fetch threw", error);
+    return {};
+  }
+};
 
 export const loadCachedSettings = async (): Promise<UserSettings | null> => {
   try {
@@ -48,27 +189,26 @@ export const storeCachedSettings = async (settings: UserSettings) => {
   }
 };
 
-const fetchProfile = async (): Promise<ProfileSnapshot | null> => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+const fetchProfile = async (
+  userId: string,
+  authUser: User | null
+): Promise<ProfileSnapshot> => {
   const { data, error } = await supabase
     .from("profiles")
     .select("*")
-    .eq("id", user.id)
+    .eq("id", userId)
     .maybeSingle();
+
   if (error) {
-    console.error("Failed to load profile", error);
-    return null;
+    console.error("[personalization] profile query failed", error);
   }
 
   if (data) {
-    const rawProfile = data as Record<string, any>;
+    const rawProfile = data as Record<string, unknown>;
     const fallbackTimezone =
-      Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
-    const profile: ProfileSnapshot = {
-      id: (rawProfile.id as string) ?? user.id,
+      Intl.DateTimeFormat().resolvedOptions().timeZone?.trim() ?? "UTC";
+    return {
+      id: (rawProfile.id as string) ?? userId,
       timezone:
         typeof rawProfile.timezone === "string" &&
         rawProfile.timezone.length > 0
@@ -80,24 +220,18 @@ const fetchProfile = async (): Promise<ProfileSnapshot | null> => {
       current_streak: Number(rawProfile.current_streak ?? 0),
       last_message_at: (rawProfile.last_message_at as string | null) ?? null,
     };
-    return profile;
   }
 
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
-  const newProfile: ProfileSnapshot = {
-    id: user.id,
-    timezone,
-    onboarding_completed: false,
-    updated_at: nowIso(),
-    missed_day_count: 0,
-    current_streak: 0,
-    last_message_at: null,
-  };
+  const fallback = buildFallbackProfile(userId);
 
-  const insertPayload: Record<string, any> = {
-    id: user.id,
-    email: user.email,
-    timezone,
+  if (!authUser) {
+    return fallback;
+  }
+
+  const insertPayload: Record<string, unknown> = {
+    id: userId,
+    email: authUser.email,
+    timezone: fallback.timezone,
     onboarding_completed: false,
     missed_day_count: 0,
     current_streak: 0,
@@ -123,26 +257,23 @@ const fetchProfile = async (): Promise<ProfileSnapshot | null> => {
         });
       if (fallbackError) {
         console.error(
-          "Failed to initialize profile without timezone column",
+          "[personalization] profile init fallback failed",
           fallbackError
         );
       }
     } else {
-      console.error("Failed to initialize profile", insertError);
+      console.error("[personalization] profile init failed", insertError);
     }
   }
-  return newProfile;
+
+  return fallback;
 };
 
-const fetchSettings = async (): Promise<UserSettings | null> => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+const fetchSettings = async (userId: string): Promise<UserSettings | null> => {
   const { data, error } = await supabase
     .from("user_settings")
     .select("*")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
   if (error) {
     console.error("Failed to load personalization settings", error);
@@ -152,34 +283,63 @@ const fetchSettings = async (): Promise<UserSettings | null> => {
   return data as UserSettings;
 };
 
-export const fetchPersonalizationBundle =
-  async (): Promise<PersonalizationBundle | null> => {
-    const [profile, cachedSettings, remoteSettings] = await Promise.all([
-      fetchProfile(),
+export const fetchPersonalizationBundle = async (
+  uid?: string
+): Promise<PersonalizationBundle | null> => {
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError) {
+    console.warn("[personalization] auth.getUser failed", authError);
+  }
+
+  const userId = uid ?? user?.id ?? null;
+  if (!userId) {
+    return null;
+  }
+
+  const [profile, cachedSettings, remoteSettings, featureMap] =
+    await Promise.all([
+      fetchProfile(userId, user ?? null),
       loadCachedSettings(),
-      fetchSettings(),
+      fetchSettings(userId),
+      fetchFeatureMap(userId),
     ]);
-    if (!profile) return null;
 
-    let merged = remoteSettings ?? cachedSettings ?? null;
+  const normalizedRemote = remoteSettings
+    ? { ...remoteSettings, updated_at: remoteSettings.updated_at ?? nowIso() }
+    : null;
+  const normalizedCached = cachedSettings
+    ? { ...cachedSettings, updated_at: cachedSettings.updated_at ?? nowIso() }
+    : null;
 
-    if (remoteSettings && cachedSettings) {
-      const remoteUpdated = parseIsoDate(remoteSettings.updated_at);
-      const localUpdated = parseIsoDate(cachedSettings.updated_at);
-      merged = remoteUpdated >= localUpdated ? remoteSettings : cachedSettings;
+  let resolvedSettings: UserSettings | null = null;
+
+  if (normalizedRemote && normalizedCached) {
+    const remoteUpdated = parseIsoDate(normalizedRemote.updated_at);
+    const cachedUpdated = parseIsoDate(normalizedCached.updated_at);
+    resolvedSettings =
+      remoteUpdated >= cachedUpdated ? normalizedRemote : normalizedCached;
+    if (remoteUpdated >= cachedUpdated) {
+      await storeCachedSettings(normalizedRemote);
     }
+  } else if (normalizedRemote) {
+    resolvedSettings = normalizedRemote;
+    await storeCachedSettings(normalizedRemote);
+  } else if (normalizedCached) {
+    resolvedSettings = normalizedCached;
+  }
 
-    if (merged) {
-      const enriched: UserSettings = {
-        ...merged,
-        updated_at: merged.updated_at ?? nowIso(),
-      };
-      await storeCachedSettings(enriched);
-      return { profile, settings: enriched };
-    }
+  const runtime = buildRuntimePreferences(resolvedSettings, featureMap);
 
-    return { profile, settings: null };
+  return {
+    ...runtime,
+    profile,
+    settings: resolvedSettings,
   };
+};
 
 interface PersistOptions {
   profileTimezone: string;

@@ -15,6 +15,7 @@
     "active:sync": "ts-node active_learning/syncIntentAudits.ts",
     "active:queue": "ts-node active_learning/buildLabelQueue.ts",
     "active:merge": "ts-node active_learning/mergeLabels.ts",
+    "db:migrate:dry-run": "supabase db push --dry-run",
     "postinstall": "patch-package || true",
     "test:codex": "TS_NODE_TRANSPILE_ONLY=1 TS_NODE_COMPILER_OPTIONS='{\"module\":\"nodenext\",\"moduleResolution\":\"nodenext\",\"allowImportingTsExtensions\":true}' ts-node scripts/run-tests.ts"
   },

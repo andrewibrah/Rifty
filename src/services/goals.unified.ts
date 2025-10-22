@@ -9,6 +9,8 @@ import {
   type CreateGoalInput,
   type Goal,
   type UpdateGoalInput,
+  type GoalContextItem,
+  type GoalContextLinkedEntry,
 } from '../types/goal'
 import { generateUUID } from '../utils/id'
 import { getDedupeThreshold } from '../utils/flags'
@@ -110,6 +112,162 @@ async function fetchExistingGoals(userId: string): Promise<Goal[]> {
     throw error
   }
   return GoalSchema.array().parse(data ?? [])
+}
+
+export async function listActiveGoalsWithContext(
+  uid?: string,
+  limit = 5
+): Promise<GoalContextItem[]> {
+  const userId = uid ?? (await requireUserId())
+  const safeLimit = Math.max(1, Math.min(limit, 10))
+
+  const { data: priorityRows, error: priorityError } = await supabase
+    .from('mv_goal_priority')
+    .select('goal_id, priority_score')
+    .eq('user_id', userId)
+    .order('priority_score', { ascending: false })
+    .limit(safeLimit * 3)
+
+  if (priorityError) {
+    console.error('[goals.unified] priority fetch failed', priorityError)
+    throw priorityError
+  }
+
+  const priorities = (priorityRows ?? []) as Array<{
+    goal_id: string
+    priority_score: number | null
+  }>
+
+  if (!priorities.length) {
+    return []
+  }
+
+  const priorityMap = new Map<string, number>()
+  const goalIdSet = new Set<string>()
+  priorities.forEach((row) => {
+    if (typeof row.goal_id === 'string' && row.goal_id.length > 0) {
+      priorityMap.set(row.goal_id, Number(row.priority_score ?? 0))
+      goalIdSet.add(row.goal_id)
+    }
+  })
+
+  if (!goalIdSet.size) {
+    return []
+  }
+
+  const { data: goalRows, error: goalsError } = await supabase
+    .from('goals')
+    .select('*')
+    .in('id', Array.from(goalIdSet))
+    .eq('user_id', userId)
+
+  if (goalsError) {
+    console.error('[goals.unified] goals fetch failed', goalsError)
+    throw goalsError
+  }
+
+  const parsedGoals = GoalSchema.array().parse(goalRows ?? [])
+
+  const activeGoals = parsedGoals
+    .filter((goal) => goal.status === 'active')
+    .sort((a, b) => (priorityMap.get(b.id) ?? 0) - (priorityMap.get(a.id) ?? 0))
+    .slice(0, safeLimit)
+
+  if (!activeGoals.length) {
+    return []
+  }
+
+  const activeIds = activeGoals.map((goal) => goal.id)
+
+  const reflectionsByGoal = new Map<string, Array<{ entry_id: string; created_at: string }>>()
+  const entryIds = new Set<string>()
+
+  const { data: reflectionRows, error: reflectionError } = await supabase
+    .from('goal_reflections')
+    .select('goal_id, entry_id, created_at')
+    .in('goal_id', activeIds)
+    .order('created_at', { ascending: false })
+
+  if (reflectionError) {
+    console.warn('[goals.unified] reflections fetch failed', reflectionError)
+  } else {
+    for (const row of reflectionRows ?? []) {
+      if (typeof row.goal_id !== 'string' || typeof row.entry_id !== 'string') {
+        continue
+      }
+      if (!reflectionsByGoal.has(row.goal_id)) {
+        reflectionsByGoal.set(row.goal_id, [])
+      }
+      const bucket = reflectionsByGoal.get(row.goal_id) as Array<{
+        entry_id: string
+        created_at: string
+      }>
+      if (bucket.length < 3) {
+        bucket.push({ entry_id: row.entry_id, created_at: row.created_at ?? new Date().toISOString() })
+      }
+      entryIds.add(row.entry_id)
+    }
+  }
+
+  const entryMap = new Map<string, { id: string; content: string; created_at: string }>()
+  if (entryIds.size > 0) {
+    const { data: entryRows, error: entryError } = await supabase
+      .from('entries')
+      .select('id, content, created_at')
+      .in('id', Array.from(entryIds))
+      .eq('user_id', userId)
+
+    if (entryError) {
+      console.warn('[goals.unified] linked entry fetch failed', entryError)
+    } else {
+      for (const row of entryRows ?? []) {
+        if (typeof row.id === 'string') {
+          entryMap.set(row.id, {
+            id: row.id,
+            content: typeof row.content === 'string' ? row.content : '',
+            created_at: row.created_at ?? new Date().toISOString(),
+          })
+        }
+      }
+    }
+  }
+
+  return activeGoals.map((goal) => {
+    const microSteps = sanitizeMicroSteps(goal.micro_steps)
+    const progress = computeProgress(microSteps)
+    const priority_score = priorityMap.get(goal.id) ?? 0
+    const metadata = goal.metadata ?? {}
+    const conflicts = Array.isArray(metadata?.conflicts)
+      ? metadata.conflicts.filter((value: unknown): value is string => typeof value === 'string')
+      : []
+
+    const linkedEntriesRaw = reflectionsByGoal.get(goal.id) ?? []
+    const linked_entries: GoalContextLinkedEntry[] = linkedEntriesRaw
+      .map((row) => entryMap.get(row.entry_id))
+      .filter((entry): entry is { id: string; content: string; created_at: string } => Boolean(entry))
+      .map((entry) => ({
+        id: entry.id,
+        created_at: entry.created_at,
+        snippet: entry.content.slice(0, 200),
+      }))
+
+    return {
+      id: goal.id,
+      title: goal.title,
+      status: goal.status,
+      priority_score,
+      target_date: toISODate(goal.target_date ?? undefined),
+      current_step: goal.current_step ?? nextCurrentStep(microSteps),
+      micro_steps: microSteps,
+      progress,
+      description: goal.description ?? null,
+      updated_at: goal.updated_at ?? null,
+      metadata,
+      source_entry_id: goal.source_entry_id ?? null,
+      conflicts,
+      linked_entries,
+    }
+  })
 }
 
 async function upsertProgressCache(goal: Goal): Promise<void> {

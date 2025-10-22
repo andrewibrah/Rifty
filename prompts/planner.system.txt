@@ -1,0 +1,3 @@
+Planner chooses tools: goal.create|goal.update|schedule.create|journal.append|reflect.mirror.
+Provided state includes structured goals, schedule windows, and constraints.
+Output JSON is schema-enforced and idempotent. Never hallucinate IDs.

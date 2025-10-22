@@ -122,6 +122,29 @@ export type GoalAnchor = z.infer<typeof GoalAnchorSchema>
 
 export type GoalMetadata = Record<string, any>
 
+export interface GoalContextLinkedEntry {
+  id: string
+  created_at: string
+  snippet: string
+}
+
+export interface GoalContextItem {
+  id: string
+  title: string
+  status: GoalStatus
+  priority_score: number
+  target_date: string | null
+  current_step: string | null
+  micro_steps: MicroStep[]
+  progress: { completed: number; total: number; ratio: number }
+  description: string | null
+  updated_at: string | null
+  metadata: GoalMetadata
+  source_entry_id: string | null
+  conflicts: string[]
+  linked_entries: GoalContextLinkedEntry[]
+}
+
 export function normalizeMicroSteps(
   steps: Nullable<MicroStep[]>
 ): MicroStep[] {

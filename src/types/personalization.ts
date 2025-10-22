@@ -56,7 +56,28 @@ export type PersonaTag =
   | "Accelerator"
   | "Generalist";
 
-export interface PersonalizationBundle {
+export type PrivacyGateKey =
+  | "journal"
+  | "goals"
+  | "schedule"
+  | "actions"
+  | string;
+
+export type PrivacyGateMap = Record<PrivacyGateKey, boolean>;
+
+export interface PersonalizationRuntime {
+  user_settings: UserSettings | null;
+  persona: PersonaTag | null;
+  cadence: ReflectionCadence;
+  tone: LanguageIntensity;
+  spiritual_on: boolean;
+  bluntness: number;
+  privacy_gates: PrivacyGateMap;
+  crisis_rules: Record<string, unknown>;
+  resolved_at: string;
+}
+
+export interface PersonalizationBundle extends PersonalizationRuntime {
   profile: ProfileSnapshot;
   settings: UserSettings | null;
 }

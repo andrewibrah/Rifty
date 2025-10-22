@@ -6,7 +6,13 @@ import type {
   EntryMessage,
   BotMessage,
 } from "../types/chat";
-import { appendMessage, listJournals, type EntryType } from "../services/data";
+import {
+  appendMessage,
+  listJournals,
+  type EntryType,
+  getJournalEntryById,
+  updateJournalEntry,
+} from "../services/data";
 import { createEntryFromChat } from "../lib/entries";
 import type {
   EntryNotePayload,
@@ -16,7 +22,12 @@ import type {
   ProcessingStepId,
 } from "../types/intent";
 import type { MemoryKind } from "@/agent/memory";
-import { answerAnalystQuery } from "../services/memory";
+import {
+  answerAnalystQuery,
+  persistUserFacts,
+  type PersistedFactInput,
+} from "../services/memory";
+import type { PersistedScheduleBlock } from "../services/schedules";
 import { handleMessage } from "@/chat/handleMessage";
 import { planAction } from "@/agent/planner";
 import { handleToolCall } from "@/agent/actions";
@@ -32,6 +43,55 @@ import { supabase } from "../lib/supabase";
 import { isGoalsV2Enabled } from "../utils/flags";
 
 const MAX_ACTIVE_GOALS = 3;
+
+const toPersistedFacts = (learned: string): PersistedFactInput[] => {
+  if (typeof learned !== "string") {
+    return [];
+  }
+  const lines = learned
+    .split(/\n+/)
+    .map((line) => line.replace(/^[\s*•\-]+/, "").trim())
+    .filter((line) => line.length > 0);
+
+  return lines.map((line) => {
+    const normalized = line
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48);
+    const key = normalized ? `learned:${normalized}` : `learned:${generateUUID()}`;
+    return {
+      key,
+      value: line,
+      tags: ["learned", "main_chat"],
+    } satisfies PersistedFactInput;
+  });
+};
+
+const logActionEvent = async (
+  type: string,
+  subjectType: "goal" | "entry" | "schedule",
+  subjectId: string | null,
+  payload: Record<string, unknown>
+): Promise<void> => {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user?.id) {
+      return;
+    }
+    await supabase.from("events").insert({
+      user_id: user.id,
+      type,
+      subject_type: subjectType,
+      subject_id: subjectId,
+      payload,
+    });
+  } catch (error) {
+    throw error;
+  }
+};
 
 type PlannerGoalShape = {
   title: string | null;
@@ -737,7 +797,7 @@ export const useChatState = (
 
           options?.onBotMessage?.(finalBotMessage);
 
-          const toolExecution = handleToolCall(planner, {
+          const toolExecution = await handleToolCall(planner, {
             originalText: trimmedContent,
           });
 
@@ -763,32 +823,121 @@ export const useChatState = (
             });
           }
 
+          if (toolExecution?.action === "schedule.create") {
+            const schedule = toolExecution.payload?.schedule as PersistedScheduleBlock | undefined;
+            if (schedule) {
+              const startDate = new Date(schedule.start_at);
+              const endDate = new Date(schedule.end_at);
+              const startLabel = startDate.toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              });
+              const endLabel = endDate.toLocaleTimeString(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+              });
+              const confirmation: BotMessage = {
+                id: `bot-schedule-${schedule.id}`,
+                kind: "bot",
+                afterId: tempId,
+                content: `Booked ${schedule.intent} on ${startLabel} – ${endLabel}.`,
+                created_at: new Date().toISOString(),
+                status: "sent",
+              };
+              setMessages((prev) => [...prev, confirmation]);
+              options?.onBotMessage?.(confirmation);
+
+              setPendingAction({
+                entryId: schedule.id,
+                action: `Schedule booked for ${startLabel}`,
+              });
+
+              try {
+                await Memory.upsert({
+                  id: schedule.id,
+                  kind: 'schedule',
+                  text: `${schedule.intent} | ${startLabel} → ${endLabel}`,
+                  ts: startDate.getTime(),
+                });
+              } catch (memoryError) {
+                console.warn('[Chat] schedule memory upsert failed', memoryError);
+              }
+
+              try {
+                await logActionEvent('action.accepted', 'schedule', schedule.id, {
+                  goal_id: schedule.goal_id,
+                  start_at: schedule.start_at,
+                  end_at: schedule.end_at,
+                  receipts: schedule.receipts,
+                });
+              } catch (eventError) {
+                console.warn('[Chat] schedule event log failed', eventError);
+              }
+            }
+          }
+
           const persist = async () => {
-            if (!shouldPersistEntry) {
+            const isAppendFlow = shouldAppendEntry && Boolean(targetEntryId);
+            if (!shouldPersistEntry && !isAppendFlow) {
               return;
             }
+
             try {
               const note = buildLocalFallbackNote(
                 intentMeta.displayLabel,
                 trimmedContent
               );
 
-              const savedEntry = await createEntryFromChat({
-                content: trimmedContent,
-                entryType: resolvedType,
-                intent: prediction,
-                note,
-                processingTimeline: finalTimeline,
-                nativeIntent: intentPayload.nativeIntent,
-                enriched: intentPayload.enriched,
-                decision: intentPayload.decision,
-                redaction: intentPayload.redaction,
-                memoryMatches: intentPayload.memoryMatches,
-                plan: planner,
-              });
+              let persistedEntryId: string | null = null;
+              let persistedEntryType: EntryType | null = resolvedType;
+              let persistedContent = trimmedContent;
+              let persistedMetadata: Record<string, any> | null = null;
 
-              createdEntryId = savedEntry.id;
-              ContextWindow.registerEntry(savedEntry.id, resolvedType ?? 'unknown');
+              if (isAppendFlow && targetEntryId) {
+                const existing = await getJournalEntryById(targetEntryId);
+                const baseContent =
+                  typeof existing?.content === "string" ? existing.content.trim() : "";
+                const separator = baseContent.length > 0 ? "\n\n" : "";
+                const combinedContent = `${baseContent}${separator}${trimmedContent}`.trim();
+                persistedMetadata = (existing?.metadata as Record<string, any> | null) ?? null;
+                const updated = await updateJournalEntry(targetEntryId, {
+                  content: combinedContent,
+                });
+
+                persistedEntryId = updated.id;
+                persistedEntryType = (updated.type as EntryType | undefined) ?? resolvedType;
+                persistedContent = combinedContent;
+                persistedMetadata = (updated.metadata as Record<string, any> | null) ?? persistedMetadata;
+                createdEntryId = updated.id;
+                ContextWindow.refreshEntry(updated.id, persistedEntryType ?? 'unknown');
+              } else {
+                const savedEntry = await createEntryFromChat({
+                  content: trimmedContent,
+                  entryType: resolvedType,
+                  intent: prediction,
+                  note,
+                  processingTimeline: finalTimeline,
+                  nativeIntent: intentPayload.nativeIntent,
+                  enriched: intentPayload.enriched,
+                  decision: intentPayload.decision,
+                  redaction: intentPayload.redaction,
+                  memoryMatches: intentPayload.memoryMatches,
+                  plan: planner,
+                });
+
+                persistedEntryId = savedEntry.id;
+                persistedEntryType = (savedEntry.type as EntryType | undefined) ?? resolvedType;
+                persistedContent = savedEntry.content ?? trimmedContent;
+                persistedMetadata = (savedEntry.metadata as Record<string, any> | null) ?? null;
+                createdEntryId = savedEntry.id;
+                ContextWindow.registerEntry(savedEntry.id, persistedEntryType ?? 'unknown');
+              }
+
+              if (!persistedEntryId) {
+                throw new Error('Unable to determine entry id after persistence');
+              }
 
               finalTimeline = finalTimeline.map((step) =>
                 step.status === "running" ? { ...step, status: "done" } : step
@@ -799,7 +948,7 @@ export const useChatState = (
                   if (msg.id === tempId && msg.kind === "entry") {
                     return {
                       ...msg,
-                      id: savedEntry.id,
+                      id: persistedEntryId,
                       processing: finalTimeline,
                       aiMeta: {
                         ...(msg.aiMeta ?? {}),
@@ -814,8 +963,14 @@ export const useChatState = (
                   if (msg.id === `bot-${tempId}` && msg.kind === "bot") {
                     return {
                       ...msg,
-                      id: `bot-${savedEntry.id}`,
-                      afterId: savedEntry.id,
+                      id: `bot-${persistedEntryId}`,
+                      afterId: persistedEntryId,
+                    };
+                  }
+                  if (msg.kind === "bot" && msg.afterId === tempId) {
+                    return {
+                      ...msg,
+                      afterId: persistedEntryId,
                     };
                   }
                   return msg;
@@ -824,20 +979,20 @@ export const useChatState = (
 
               setPendingGoal((prev) =>
                 prev && prev.entryId === tempId
-                  ? { entryId: savedEntry.id, goalData: prev.goalData }
+                  ? { entryId: persistedEntryId, goalData: prev.goalData }
                   : prev
               );
               setPendingAction((prev) =>
                 prev && prev.entryId === tempId
-                  ? { entryId: savedEntry.id, action: prev.action }
+                  ? { entryId: persistedEntryId, action: prev.action }
                   : prev
               );
 
               InteractionManager.runAfterInteractions(() => {
                 void (async () => {
-                  appendMessage(savedEntry.id, "user", trimmedContent, {
+                  appendMessage(persistedEntryId!, "user", trimmedContent, {
                     messageKind: "entry",
-                    entryType: resolvedType,
+                    entryType: persistedEntryType ?? resolvedType,
                     aiIntent: intentMeta.id,
                     aiConfidence: intentMeta.confidence,
                     aiMeta: {
@@ -851,10 +1006,10 @@ export const useChatState = (
                     console.error("Unable to record entry message", error);
                   });
 
-                  appendMessage(savedEntry.id, "assistant", mainReply.reply, {
+                  appendMessage(persistedEntryId!, "assistant", mainReply.reply, {
                     messageKind: "autoReply",
-                    entryType: resolvedType,
-                    afterId: savedEntry.id,
+                    entryType: persistedEntryType ?? resolvedType,
+                    afterId: persistedEntryId!,
                     aiIntent: intentMeta.id,
                     aiConfidence: intentMeta.confidence,
                     aiMeta: {
@@ -867,19 +1022,30 @@ export const useChatState = (
                     console.error("Unable to record auto-reply", error);
                   });
 
-                  const memoryKind = entryTypeToMemoryKind[resolvedType];
+                  const entryKind =
+                    persistedEntryType && entryTypeToMemoryKind[persistedEntryType]
+                      ? persistedEntryType
+                      : 'journal';
+                  const memoryKind = entryTypeToMemoryKind[entryKind];
                   try {
                     await Memory.upsert({
-                      id: savedEntry.id,
+                      id: persistedEntryId!,
                       kind: memoryKind,
-                      text: trimmedContent,
+                      text: persistedContent,
                       ts: Date.now(),
                     });
                   } catch (memoryError) {
                     console.warn("[Chat] memory upsert failed", memoryError);
                   }
 
-                  void maybeRecallGoal(trimmedContent, savedEntry.id);
+                  const learnedFacts = toPersistedFacts(mainReply.learned);
+                  if (learnedFacts.length) {
+                    persistUserFacts(null, learnedFacts).catch((error) => {
+                      console.warn('[Chat] persist learned facts failed', error);
+                    });
+                  }
+
+                  void maybeRecallGoal(trimmedContent, persistedEntryId!);
 
                   if (toolExecution?.action === "goal.create" && toolPayload) {
                     try {
@@ -902,7 +1068,7 @@ export const useChatState = (
                           const limitMessage: BotMessage = {
                             id: `bot-${generateUUID()}`,
                             kind: "bot",
-                            afterId: savedEntry.id,
+                            afterId: persistedEntryId!,
                             content:
                               "You already have three active goals. Archive or complete one before starting another.",
                             created_at: new Date().toISOString(),
@@ -914,7 +1080,7 @@ export const useChatState = (
                           const goalPayload: CreateGoalParams = {
                             title: goalShape.title,
                             micro_steps: buildMicroSteps(goalShape.microSteps),
-                            source_entry_id: savedEntry.id,
+                            source_entry_id: persistedEntryId!,
                             metadata: {
                               plannerPayload: toolPayload,
                             },
@@ -931,10 +1097,33 @@ export const useChatState = (
 
                           const created = await createGoal(goalPayload);
 
+                          try {
+                            const updatedMetadata = {
+                              ...(persistedMetadata ?? {}),
+                              goal_id: created.id,
+                              goal_title: created.title,
+                            };
+                            await updateJournalEntry(persistedEntryId!, {
+                              metadata: updatedMetadata,
+                            });
+                            persistedMetadata = updatedMetadata;
+                          } catch (metadataError) {
+                            console.warn('[Chat] failed to tag entry with goal id', metadataError);
+                          }
+
+                          try {
+                            await logActionEvent('action.accepted', 'goal', created.id, {
+                              entry_id: persistedEntryId,
+                              planner_payload: toolPayload,
+                            });
+                          } catch (eventError) {
+                            console.warn('[Chat] goal event log failed', eventError);
+                          }
+
                           const celebration: BotMessage = {
                             id: `bot-${generateUUID()}`,
                             kind: "bot",
-                            afterId: savedEntry.id,
+                            afterId: persistedEntryId!,
                             content: `Goal captured: ${created.title}`,
                             created_at: new Date().toISOString(),
                             status: "sent",

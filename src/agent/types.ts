@@ -1,3 +1,5 @@
+import type { GoalContextItem } from '@/types/goal';
+
 export interface RoutedIntent {
   label: string;
   rawLabel: string;
@@ -33,6 +35,7 @@ export interface EnrichedPayload {
   intent: RoutedIntent;
   contextSnippets: string[];
   userConfig: Record<string, unknown>;
+  goalContext?: GoalContextItem[];
   classification?: {
     id: string;
     label: string;
