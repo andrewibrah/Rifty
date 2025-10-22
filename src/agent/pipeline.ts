@@ -9,12 +9,13 @@ import { buildRoutedIntent, route } from '@/agent/intentRouting';
 import { Telemetry } from '@/agent/telemetry';
 import type { EnrichedPayload, RouteDecision, RoutedIntent } from '@/agent/types';
 import { classifyRiflettIntent, toNativeLabel } from './riflettIntentClassifier';
-import { listActiveGoalsWithContext } from '@/services/goals.unified';
+import { assessUserState, generateCoachingSuggestion } from './coaching';import { listActiveGoalsWithContext } from '@/services/goals.unified';
 import type { GoalContextItem } from '@/types/goal';
 import type { MemoryRecord } from '@/agent/memory';
 import type { PersonalizationRuntime } from '@/types/personalization';
 
 export interface HandleUtteranceOptions {
+  uid?: string;
   userTimeZone?: string;
   topK?: number;
   userConfig?: Partial<PersonalizationRuntime>;
@@ -131,6 +132,31 @@ export const scoreContextRecords = (records: MemoryRecord[]): ScoredMemoryRecord
       const affect = 0.5;
       const relationship = relationshipWeightByKind[record.kind] ?? 0.4;
 
+      // Time-of-day relevance
+      let timeOfDayScore = 0.5;
+      if (options?.userTimeZone) {
+        try {
+          const recordDate = new Date(record.ts);
+          const now = new Date();
+          const recordHour = recordDate.getUTCHours() + (recordDate.getTimezoneOffset() / 60);
+          const nowHour = now.getUTCHours() + (now.getTimezoneOffset() / 60);
+          const hourDiff = Math.abs(recordHour - nowHour);
+          timeOfDayScore = Math.max(0, 1 - hourDiff / 12);
+        } catch (error) {
+          // Ignore
+        }
+      }
+
+      // Coaching boost
+      let coachingBoost = 0;
+      if (options?.coachingSuggestion) {
+        const suggestion = options.coachingSuggestion;
+        if (suggestion.type === 'goal_check' && record.kind === 'goal') {
+          coachingBoost = 0.2;
+        } else if (suggestion.type === 'reflection' && record.kind === 'entry') {
+          coachingBoost = 0.15;
+        }
+      }
       const composite =
         0.4 * recencyScore +
         0.3 * priority +
@@ -191,7 +217,7 @@ export async function handleUtterance(
     topK: options.topK ?? 5,
   });
 
-  const scoredContextRecords = scoreContextRecords(contextRecords);
+  const scoredContextRecords = scoreContextRecords(contextRecords, { userTimeZone: options.userTimeZone });
 
   const telemetryRetrieval = scoredContextRecords.map((record) => ({
     id: record.id,

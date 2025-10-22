@@ -98,7 +98,7 @@ interface GoalMatch {
 }
 
 const CADENCE_VALUES: ReflectionCadence[] = ['none', 'daily', 'weekly']
-
+const safeQuery = async <T>(query: Promise<{ data: T; error: any }>): Promise<{ data: T | null; error: any }> => { try { return await query } catch (e) { return { data: null, error: e } } }
 const isReflectionCadence = (value: unknown): value is ReflectionCadence =>
   typeof value === 'string' && CADENCE_VALUES.includes(value as ReflectionCadence)
 
@@ -175,14 +175,14 @@ export async function getOperatingPicture(
   const now = new Date()
   const future = new Date(now.getTime() + 72 * 60 * 60 * 1000)
 
-  const [featureRes, goalsRes, entryRes, scheduleRes, settingsRes, profileRes] =
+  const featureRes = await (async () => { try { return await supabase.from('features').select('key, value_json').eq('user_id', userId).in('key', ['why_model', 'risk_flags', 'cadence_profile']) } catch (e) { return { data: null, error: e } } })(); await Promise.allSettled([
     await Promise.all([
-      supabase
+      safeQuery(supabase
         .from('features')
         .select('key, value_json')
         .eq('user_id', userId)
         .in('key', ['why_model', 'risk_flags', 'cadence_profile']),
-      supabase
+      safeQuery(supabase
         .from('mv_goal_priority')
         .select(
           `goal_id, priority_score, goals!inner(
@@ -199,7 +199,7 @@ export async function getOperatingPicture(
         .eq('user_id', userId)
         .order('priority_score', { ascending: false })
         .limit(3),
-      supabase
+      safeQuery(supabase
         .from('entry_summaries')
         .select(
           `entry_id,
@@ -212,7 +212,7 @@ export async function getOperatingPicture(
         .order('urgency_level', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(6),
-      supabase
+      safeQuery(supabase
         .from('schedule_blocks')
         .select(
           'id, intent, summary, start_at, end_at, goal_id, location, attendees, receipts'
@@ -222,16 +222,16 @@ export async function getOperatingPicture(
         .lte('start_at', future.toISOString())
         .order('start_at', { ascending: true })
         .limit(6),
-      supabase
+      safeQuery(supabase
         .from('user_settings')
         .select('cadence, session_length_minutes')
         .eq('user_id', userId)
-        .maybeSingle(),
-      supabase
+        .maybeSingle())
+      safeQuery(supabase
         .from('profiles')
         .select('timezone, missed_day_count, current_streak, last_message_at')
         .eq('id', userId)
-        .maybeSingle(),
+        .maybeSingle())
     ])
 
   if (featureRes.error) {
@@ -410,7 +410,7 @@ const mapEntryResults = (
     const result: RagResult = {
       id: match.entry_id,
       kind: 'entry',
-      score: Number(match.similarity ?? 0),
+      score: 0.7 * Number(match.similarity ?? 0) + 0.3 * computeTokenScore(query, snippetSource),
       snippet: snippetSource.slice(0, 220),
       metadata: {
         created_at: entry.created_at ?? null,
@@ -446,7 +446,7 @@ const mapGoalResults = (
     const result: RagResult = {
       id: match.goal_id,
       kind: 'goal',
-      score: Number(match.similarity ?? 0),
+      score: 0.7 * Number(match.similarity ?? 0) + 0.3 * computeTokenScore(query, snippetSource),
       title: typeof goal.title === 'string' ? goal.title : match.title ?? 'Goal',
       snippet: snippetSource.slice(0, 220),
       metadata: {
@@ -575,7 +575,7 @@ export async function ragSearch(
               },
               {}
             )
-            results.push(...mapEntryResults(entryMatches, entryMap))
+            results.push(...mapEntryResults(entryMatches, entryMap, trimmed))
           }
         }
       }
@@ -623,7 +623,7 @@ export async function ragSearch(
               },
               {}
             )
-            results.push(...mapGoalResults(goalMatches, goalMap))
+            results.push(...mapGoalResults(goalMatches, goalMap, trimmed))
           }
         }
       }
@@ -705,7 +705,7 @@ export async function persistUserFacts(
     return
   }
 
-  const { error } = await supabase
+  const { error } = await safeQuery(supabase
     .from('features')
     .upsert(rows, { onConflict: 'user_id,key' })
 
@@ -993,7 +993,7 @@ export async function deleteUserFact(factId: string): Promise<void> {
     throw new Error('User not authenticated')
   }
 
-  const { error } = await supabase
+  const { error } = await safeQuery(supabase
     .from('user_facts')
     .delete()
     .eq('id', factId)
