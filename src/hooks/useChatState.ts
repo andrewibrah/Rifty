@@ -28,6 +28,7 @@ import {
   type PersistedFactInput,
 } from "../services/memory";
 import type { PersistedScheduleBlock } from "../services/schedules";
+import { Telemetry, type TraceEvent } from "@/agent/telemetry";
 import { handleMessage } from "@/chat/handleMessage";
 import { planAction } from "@/agent/planner";
 import { handleToolCall } from "@/agent/actions";
@@ -681,6 +682,28 @@ export const useChatState = (
             | EntryType
             | null;
 
+          const previewJson = (value: unknown): string | null => {
+            if (!value) return null;
+            try {
+              const stringified = JSON.stringify(value);
+              return stringified.length > 160
+                ? `${stringified.slice(0, 157)}…`
+                : stringified;
+            } catch (error) {
+              return null;
+            }
+          };
+
+          const applyTelemetryPatch = async (patch: Partial<TraceEvent>) => {
+            if (!intentPayload.traceId) return;
+            try {
+              await Telemetry.update(intentPayload.traceId, patch);
+            } catch (error) {
+              console.warn('[telemetry] update failed', error);
+            }
+          };
+          let actionRecorded = false;
+
           if (targetEntryId && (shouldAppendEntry || shouldDiscussEntry)) {
             ContextWindow.refreshEntry(targetEntryId, targetEntryType ?? 'unknown');
           }
@@ -709,6 +732,14 @@ export const useChatState = (
           } catch (plannerError) {
             console.warn("[Chat] planner failed", plannerError);
           }
+
+          void applyTelemetryPatch({
+            planner: {
+              action: planner?.action ?? null,
+              ask: planner?.ask ?? null,
+              payloadPreview: planner ? previewJson(planner.payload ?? {}) : null,
+            },
+          });
 
           advanceTimeline("openai_request", "running", "Generating response");
 
@@ -750,6 +781,11 @@ export const useChatState = (
 
           advanceTimeline("openai_request", "done", "Prompt dispatched");
           advanceTimeline("openai_response", "done", "Response captured");
+
+          void applyTelemetryPatch({
+            confidence: mainReply.confidence,
+            receipts: mainReply.receiptsFooter,
+          });
 
           let finalTimeline = processingSteps;
           setMessages((prevMessages) =>
@@ -875,12 +911,35 @@ export const useChatState = (
               } catch (eventError) {
                 console.warn('[Chat] schedule event log failed', eventError);
               }
+
+              void applyTelemetryPatch({
+                action: {
+                  type: 'schedule.create',
+                  status: 'accepted',
+                  ids: [schedule.id],
+                  metadata: {
+                    goal_id: schedule.goal_id,
+                    start_at: schedule.start_at,
+                    end_at: schedule.end_at,
+                  },
+                },
+              });
+              actionRecorded = true;
             }
           }
 
           const persist = async () => {
             const isAppendFlow = shouldAppendEntry && Boolean(targetEntryId);
             if (!shouldPersistEntry && !isAppendFlow) {
+              if (!actionRecorded) {
+                void applyTelemetryPatch({
+                  action: {
+                    type: 'none',
+                    status: 'none',
+                    ids: [],
+                  },
+                });
+              }
               return;
             }
 
@@ -957,6 +1016,9 @@ export const useChatState = (
                         processingTimeline: finalTimeline,
                         learned: mainReply.learned,
                         ethical: mainReply.ethical,
+                        receiptsFooter: mainReply.receiptsFooter,
+                        confidence: mainReply.confidence,
+                        synthesis: mainReply.synthesis,
                       },
                     };
                   }
@@ -1001,6 +1063,9 @@ export const useChatState = (
                       processingTimeline: finalTimeline,
                       learned: mainReply.learned,
                       ethical: mainReply.ethical,
+                      receiptsFooter: mainReply.receiptsFooter,
+                      confidence: mainReply.confidence,
+                      synthesis: mainReply.synthesis,
                     },
                   }).catch((error) => {
                     console.error("Unable to record entry message", error);
@@ -1017,6 +1082,9 @@ export const useChatState = (
                       learned: mainReply.learned,
                       ethical: mainReply.ethical,
                       plan: planner,
+                      receiptsFooter: mainReply.receiptsFooter,
+                      confidence: mainReply.confidence,
+                      synthesis: mainReply.synthesis,
                     },
                   }).catch((error) => {
                     console.error("Unable to record auto-reply", error);
@@ -1120,6 +1188,18 @@ export const useChatState = (
                             console.warn('[Chat] goal event log failed', eventError);
                           }
 
+                          void applyTelemetryPatch({
+                            action: {
+                              type: 'goal.create',
+                              status: 'accepted',
+                              ids: [created.id],
+                              metadata: {
+                                entry_id: persistedEntryId,
+                              },
+                            },
+                          });
+                          actionRecorded = true;
+
                           const celebration: BotMessage = {
                             id: `bot-${generateUUID()}`,
                             kind: "bot",
@@ -1142,8 +1222,33 @@ export const useChatState = (
                   }
                 })();
               });
+
+              if (!actionRecorded) {
+                void applyTelemetryPatch({
+                  action: {
+                    type: planner?.action ?? 'none',
+                    status: 'none',
+                    ids: [],
+                  },
+                });
+              }
             } catch (persistError) {
               console.error("[Chat] persist failed", persistError);
+              if (!actionRecorded) {
+                void applyTelemetryPatch({
+                  action: {
+                    type: planner?.action ?? 'unknown',
+                    status: 'failed',
+                    ids: [],
+                    metadata: {
+                      message:
+                        persistError instanceof Error
+                          ? persistError.message
+                          : 'Failed to persist entry',
+                    },
+                  },
+                });
+              }
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === tempId && msg.kind === "entry"

@@ -114,7 +114,7 @@ interface ScoredMemoryRecord extends MemoryRecord {
   };
 }
 
-const scoreContextRecords = (records: MemoryRecord[]): ScoredMemoryRecord[] => {
+export const scoreContextRecords = (records: MemoryRecord[]): ScoredMemoryRecord[] => {
   if (!records.length) return [];
 
   const timestamps = records.map((record) => record.ts ?? 0);
@@ -153,6 +153,13 @@ const scoreContextRecords = (records: MemoryRecord[]): ScoredMemoryRecord[] => {
     .sort((a, b) => b.compositeScore - a.compositeScore);
 };
 
+const summarizeRedactions = (map: Record<string, string>): Record<string, number> => {
+  return Object.entries(map).reduce<Record<string, number>>((acc, [placeholder, value]) => {
+    acc[placeholder] = typeof value === 'string' ? value.length : 0;
+    return acc;
+  }, {});
+};
+
 const ensureUserConfig = async (
   override?: Partial<PersonalizationRuntime>
 ): Promise<PersonalizationRuntime> => {
@@ -185,6 +192,13 @@ export async function handleUtterance(
   });
 
   const scoredContextRecords = scoreContextRecords(contextRecords);
+
+  const telemetryRetrieval = scoredContextRecords.map((record) => ({
+    id: record.id,
+    kind: record.kind,
+    compositeScore: Number(record.compositeScore.toFixed(3)),
+    scoring: record.scoring,
+  }));
 
   const classification = classifyRiflettIntent({
     text: trimmed,
@@ -256,10 +270,12 @@ export async function handleUtterance(
   let traceId: string | null = null;
   try {
     traceId = await Telemetry.record({
-      userText: trimmed,
-      intent: withSlots,
+      maskedUserText: redaction.masked,
+      intentLabel: withSlots.label,
+      intentConfidence: withSlots.confidence,
       decision,
-      plan: null,
+      retrieval: telemetryRetrieval,
+      redactionSummary: summarizeRedactions(redaction.replacementMap),
       startedAt,
     });
   } catch (error) {

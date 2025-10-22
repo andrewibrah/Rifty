@@ -1,18 +1,58 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { nanoid } from '@/agent/utils/nanoid';
-import type { RouteDecision, RoutedIntent, EnrichedPayload, PlannerResponse } from '@/agent/types';
+import type { RouteDecision } from '@/agent/types';
 
-const STORAGE_KEY = 'riflett_traces_v1';
+const STORAGE_KEY = 'riflett_traces_v2';
 const MAX_TRACES = 100;
+
+export interface RetrievalTelemetry {
+  id: string;
+  kind: string;
+  compositeScore: number;
+  scoring: {
+    recency: number;
+    priority: number;
+    semantic: number;
+    affect: number;
+    relationship: number;
+  };
+}
+
+export interface PlannerTelemetry {
+  action: string | null;
+  ask: string | null;
+  payloadPreview: string | null;
+}
+
+export type ActionStatus = 'pending' | 'accepted' | 'declined' | 'failed' | 'none';
+
+export interface ActionTelemetry {
+  type: string;
+  status: ActionStatus;
+  ids: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface ConfidenceTelemetry {
+  retrieval: number;
+  plan: number;
+  overall: number;
+}
 
 export interface TraceEvent {
   id: string;
   ts: number;
-  userText: string;
-  intent: RoutedIntent;
+  maskedUserText: string;
+  intentLabel: string;
+  intentConfidence: number;
   decision: RouteDecision;
-  plan?: PlannerResponse | null;
+  retrieval: RetrievalTelemetry[];
+  redactionSummary: Record<string, number>;
   latencyMs?: number;
+  planner?: PlannerTelemetry | null;
+  action?: ActionTelemetry | null;
+  confidence?: ConfidenceTelemetry | null;
+  receipts?: string[];
 }
 
 const loadTraces = async (): Promise<TraceEvent[]> => {
@@ -40,10 +80,12 @@ const saveTraces = async (traces: TraceEvent[]): Promise<void> => {
 
 export const Telemetry = {
   async record(params: {
-    userText: string;
-    intent: RoutedIntent;
+    maskedUserText: string;
+    intentLabel: string;
+    intentConfidence: number;
     decision: RouteDecision;
-    plan?: PlannerResponse | null;
+    retrieval: RetrievalTelemetry[];
+    redactionSummary: Record<string, number>;
     startedAt: number;
   }): Promise<string> {
     const traces = await loadTraces();
@@ -51,11 +93,15 @@ export const Telemetry = {
     traces.unshift({
       id,
       ts: Date.now(),
-      userText: params.userText,
-      intent: params.intent,
+      maskedUserText: params.maskedUserText,
+      intentLabel: params.intentLabel,
+      intentConfidence: params.intentConfidence,
       decision: params.decision,
-      plan: params.plan ?? null,
+      retrieval: params.retrieval,
+      redactionSummary: params.redactionSummary,
       latencyMs: Date.now() - params.startedAt,
+      planner: null,
+      action: null,
     });
     await saveTraces(traces);
     return id;

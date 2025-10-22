@@ -12,6 +12,9 @@ type MainChatAiResponse = {
   reply: string
   learned: string
   ethical: string
+  receiptsFooter: string[]
+  confidence: SynthesisResult['confidence']
+  synthesis: SynthesisResult
 }
 
 export interface MainChatBrief {
@@ -303,6 +306,24 @@ export function synthesize(
 const STREAM_SYSTEM_PROMPT =
   'You are Riflett. Stream only the user-facing reply, keeping diagnosis → levers → reversible action order.'
 
+export const buildReceiptsFooter = (synthesis: SynthesisResult): string[] => {
+  const receipts = new Set<string>();
+
+  synthesis.levers.forEach((lever) => {
+    if (lever.receipt) {
+      receipts.add(`${lever.receipt} · ${lever.label}`);
+    }
+  });
+
+  Object.entries(synthesis.action.receipts ?? {}).forEach(([key, value]) => {
+    if (value) {
+      receipts.add(`${key}:${value}`);
+    }
+  });
+
+  return Array.from(receipts);
+}
+
 function validateResponse(payload: any): asserts payload is MainChatAiResponse {
   if (!payload || typeof payload !== 'object') {
     throw new Error('AI response missing payload')
@@ -478,11 +499,16 @@ type GenerateArgs = {
   onToken?: (chunk: string) => void
 }
 
+type PreparedGenerateArgs = Omit<GenerateArgs, 'brief' | 'synthesis'> & {
+  brief: MainChatBrief
+  synthesis: SynthesisResult
+}
+
 export async function generateMainChatReply(args: GenerateArgs): Promise<MainChatAiResponse> {
   const planner = args.planner ?? null
   const brief = args.brief ?? (await buildBrief(null, args.intent))
   const synthesis = args.synthesis ?? synthesize(planner, brief)
-  const requestArgs: GenerateArgs = {
+  const requestArgs: PreparedGenerateArgs = {
     ...args,
     planner,
     brief,
@@ -494,9 +520,8 @@ export async function generateMainChatReply(args: GenerateArgs): Promise<MainCha
       const streamedReply = await streamReply(requestArgs, args.onToken)
       const structured = await requestStructuredResponse({ ...requestArgs, existingReply: streamedReply })
       return {
+        ...structured,
         reply: streamedReply,
-        learned: structured.learned,
-        ethical: structured.ethical,
       }
     } catch (error) {
       console.warn('[mainChat] streaming failed, falling back to non-streaming', error)
@@ -510,7 +535,7 @@ export async function generateMainChatReply(args: GenerateArgs): Promise<MainCha
 }
 
 async function requestStructuredResponse(
-  args: GenerateArgs & { existingReply?: string }
+  args: PreparedGenerateArgs & { existingReply?: string }
 ): Promise<MainChatAiResponse> {
   if (!args.brief || !args.synthesis) {
     throw new Error('Main chat brief unavailable');
@@ -586,18 +611,22 @@ Return JSON with fields "reply", "learned", and "ethical".`
       throw new Error('AI response missing content')
     }
 
-    const parsed = JSON.parse(content) as MainChatAiResponse
+    const parsed = JSON.parse(content) as {
+      reply: string
+      learned: string
+      ethical: string
+    }
     validateResponse(parsed)
 
-    if (hasOverride && args.existingReply) {
-      return {
-        reply: args.existingReply,
-        learned: parsed.learned,
-        ethical: parsed.ethical,
-      }
+    const baseReply = hasOverride && args.existingReply ? args.existingReply : parsed.reply
+    return {
+      reply: baseReply,
+      learned: parsed.learned,
+      ethical: parsed.ethical,
+      receiptsFooter: buildReceiptsFooter(args.synthesis),
+      confidence: args.synthesis.confidence,
+      synthesis: args.synthesis,
     }
-
-    return parsed
   } catch (error: any) {
     if (error?.name === 'AbortError') {
       throw new Error('AI request timed out. Please try again.')
@@ -609,7 +638,7 @@ Return JSON with fields "reply", "learned", and "ethical".`
 }
 
 async function streamReply(
-  args: GenerateArgs,
+  args: PreparedGenerateArgs,
   onToken: (chunk: string) => void
 ): Promise<string> {
   if (!args.brief || !args.synthesis) {
