@@ -142,9 +142,10 @@ const GoalsPanel = forwardRef<GoalsPanelRef, GoalsPanelProps>(
     const selectedGhiKey = selectedGoalInsight
       ? (selectedGoalInsight.ghi_state ?? "unknown").toLowerCase()
       : "unknown";
-    const selectedGhiLabel = selectedGoalInsight
-      ? selectedGoalInsight.ghi_state.toUpperCase()
-      : "";
+    const selectedGhiLabel =
+      selectedGoalInsight?.ghi_state && selectedGoalInsight.ghi_state.length > 0
+        ? selectedGoalInsight.ghi_state.toUpperCase()
+        : "";
 
     const handleSelectGoal = useCallback((goalId: string) => {
       setSelectedGoalId(goalId);

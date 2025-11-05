@@ -2,6 +2,7 @@ import { getNumberEnv } from "./config.ts";
 
 export const DEFAULT_LINK_THRESHOLD = 0.82;
 export const DEFAULT_DEDUPE_THRESHOLD = 0.9;
+export const EXPECTED_EMBEDDING_DIM = 1536;
 
 export type MicroStep = {
   id: string;
@@ -19,8 +20,18 @@ export type ReflectionRecord = {
 
 export function cosineSimilarity(a?: number[] | null, b?: number[] | null): number {
   if (!Array.isArray(a) || !Array.isArray(b)) return 0;
-  const length = Math.min(a.length, b.length);
-  if (length === 0) return 0;
+  if (a.length === 0 || b.length === 0) return 0;
+  if (a.length !== b.length) {
+    console.warn(`[cosineSimilarity] dimension mismatch: ${a.length} vs ${b.length}`);
+    return 0;
+  }
+  if (a.length !== EXPECTED_EMBEDDING_DIM) {
+    console.warn(
+      `[cosineSimilarity] unexpected vector dimension ${a.length} (expected ${EXPECTED_EMBEDDING_DIM})`,
+    );
+    return 0;
+  }
+  const length = a.length;
   let dot = 0;
   let magA = 0;
   let magB = 0;
@@ -40,6 +51,10 @@ export function averageVectors(vectors: (number[] | null | undefined)[]): number
   if (filtered.length === 0) return null;
   const length = filtered[0]?.length ?? 0;
   if (length === 0) return null;
+  const allSameLength = filtered.every((vector) => vector.length === length);
+  if (!allSameLength) {
+    throw new Error("Inconsistent vector dimensions");
+  }
   const sum = new Array<number>(length).fill(0);
   filtered.forEach((vector) => {
     for (let i = 0; i < length; i += 1) {

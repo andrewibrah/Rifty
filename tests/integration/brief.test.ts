@@ -1,7 +1,33 @@
-// @ts-nocheck
-import { describe, it, expect, vi } from 'vitest';
-import { buildBrief, synthesize } from '@/services/mainChat';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import type { IntentPayload } from '@/chat/handleMessage';
+
+vi.mock('expo-constants', () => ({
+  __esModule: true,
+  default: {
+    expoConfig: { extra: {} },
+    manifest2: { extra: {} },
+  },
+}));
+
+vi.mock('expo-modules-core', () => ({
+  __esModule: true,
+  EventEmitter: class EventEmitter {},
+  NativeModulesProxy: {},
+}));
+
+const globalAny = globalThis as typeof globalThis & { __DEV__?: boolean };
+if (globalAny.__DEV__ === undefined) {
+  globalAny.__DEV__ = false;
+}
+
+let buildBrief: typeof import('@/services/mainChat').buildBrief;
+let synthesize: typeof import('@/services/mainChat').synthesize;
+
+beforeAll(async () => {
+  const module = await import('@/services/mainChat');
+  buildBrief = module.buildBrief;
+  synthesize = module.synthesize;
+});
 
 vi.mock('@/agent/memory', () => ({
   Memory: {
@@ -26,18 +52,31 @@ vi.mock('@/agent/memory', () => ({
   },
 }));
 
-const mockIntent = {
+const routedIntent: IntentPayload['routedIntent'] = {
+  label: 'journal.create',
+  rawLabel: 'journal.create',
+  confidence: 0.9,
+  slots: {},
+  topK: [],
+};
+
+const mockIntent: IntentPayload = {
   text: 'help me plan focus time',
   decision: { kind: 'commit', primary: 'journal.create' },
-  routedIntent: {
+  routedIntent,
+  nativeIntent: {
     label: 'journal.create',
-    rawLabel: 'journal.create',
     confidence: 0.9,
-    slots: {},
+    top3: [
+      { label: 'journal.create', confidence: 0.9 },
+      { label: 'journal.update', confidence: 0.05 },
+      { label: 'journal.review', confidence: 0.05 },
+    ],
     topK: [],
   },
-  memoryMatches: [],
   enriched: {
+    userText: 'help me plan focus time',
+    intent: routedIntent,
     contextSnippets: [],
     userConfig: {},
   },
@@ -45,10 +84,22 @@ const mockIntent = {
     masked: 'help me plan focus time',
     replacementMap: {},
   },
-} as unknown as IntentPayload;
+  memoryMatches: [],
+  label: 'journal.create',
+  confidence: 0.9,
+  top3: [
+    { label: 'journal.create', confidence: 0.9 },
+    { label: 'journal.update', confidence: 0.05 },
+    { label: 'journal.review', confidence: 0.05 },
+  ],
+  traceId: null,
+};
 
 describe('buildBrief + synthesize integration', () => {
   it('produces situational brief and synthesis with receipt scaffolding', async () => {
+    if (!buildBrief || !synthesize) {
+      throw new Error('mainChat module not initialized');
+    }
     const brief = await buildBrief('user-123', mockIntent);
     const plan = synthesize(null, {
       operatingPicture: brief.operatingPicture,

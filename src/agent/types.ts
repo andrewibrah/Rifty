@@ -36,7 +36,8 @@ export interface EnrichedPayload {
   contextSnippets: string[];
   userConfig: Record<string, unknown>;
   goalContext?: GoalContextItem[];
-  coachingSuggestion?: { type: string; message: string; priority: string; context?: string };  classification?: {
+  coachingSuggestion?: { type: string; message: string; priority: string; context?: string };
+  classification?: {
     id: string;
     label: string;
     confidence: number;

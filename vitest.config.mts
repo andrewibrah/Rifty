@@ -1,27 +1,26 @@
-// @ts-nocheck
-import { defineConfig } from 'vitest/config';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { defineConfig } from "vitest/config";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const moduleFilename = fileURLToPath(import.meta.url);
+const moduleDirname = dirname(moduleFilename);
 
 export default defineConfig({
   optimizeDeps: {
-    exclude: ['react-native'],
+    exclude: ["react-native"],
   },
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src'),
-      'react-native': resolve(__dirname, 'tests/mocks/react-native.ts'),
+      "@": resolve(moduleDirname, "src"),
+      "react-native": resolve(moduleDirname, "tests/mocks/react-native.ts"),
     },
   },
   test: {
-    environment: 'node',
+    environment: "node",
     globals: true,
-    setupFiles: [resolve(__dirname, 'tests/test-setup.ts')],
+    setupFiles: [resolve(moduleDirname, "tests/test-setup.ts")],
     coverage: {
-      reporter: ['text', 'json', 'html'],
+      reporter: ["text", "json", "html"],
       thresholds: {
         global: {
           branches: 90,

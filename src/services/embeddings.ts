@@ -1,5 +1,5 @@
-import Constants from 'expo-constants'
 import { supabase } from '../lib/supabase'
+import { resolveOpenAIApiKey } from './ai'
 import type {
   EntryEmbedding,
   CreateEntryEmbeddingParams,
@@ -7,26 +7,13 @@ import type {
 } from '../types/mvp'
 import { isUUID } from '../utils/uuid'
 
-const getOpenAIKey = (): string => {
-  const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, any>
-  const apiKey =
-    extra?.openaiApiKey ||
-    extra?.EXPO_PUBLIC_OPENAI_API_KEY ||
-    extra?.OPENAI_API_KEY
-
-  if (!apiKey) {
-    throw new Error('OpenAI API key is missing')
-  }
-  return apiKey
-}
-
 const EMBEDDING_MODEL = 'text-embedding-3-small'
 
 /**
  * Generate an embedding for a given text using OpenAI
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
-  const apiKey = getOpenAIKey()
+  const apiKey = resolveOpenAIApiKey()
   const ctrl = new AbortController()
   const timeout = setTimeout(() => ctrl.abort(), 30000)
 

@@ -44,7 +44,34 @@ const ChatHistoryModal: React.FC<HistoryModalProps> = ({
     setHistoryError(null);
     try {
       const raw = await AsyncStorage.getItem(MAIN_HISTORY_STORAGE_KEY);
-      const records: MainHistoryRecord[] = raw ? JSON.parse(raw) : [];
+      let records: MainHistoryRecord[] = [];
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            records = parsed;
+          } else {
+            console.error("Corrupted history data (non-array)", { raw });
+            await AsyncStorage.removeItem(MAIN_HISTORY_STORAGE_KEY);
+            setHistoryRecords([]);
+            setHistoryError(
+              "Saved history was corrupted and has been cleared."
+            );
+            return;
+          }
+        } catch (parseError) {
+          console.error("Corrupted history data (parse failure)", {
+            raw,
+            error: parseError,
+          });
+          await AsyncStorage.removeItem(MAIN_HISTORY_STORAGE_KEY);
+          setHistoryRecords([]);
+          setHistoryError(
+            "Saved history was corrupted and has been cleared."
+          );
+          return;
+        }
+      }
       setHistoryRecords(records);
     } catch (error) {
       console.error("Failed to load history", error);
@@ -163,7 +190,10 @@ const ChatHistoryModal: React.FC<HistoryModalProps> = ({
                   </Text>
                 ) : null}
                 <Text style={styles.conversationPreview} numberOfLines={2}>
-                  {record.summary || record.messages[0]?.content || "No messages"}
+                  {record.summary ||
+                    (Array.isArray(record.messages) && record.messages.length > 0
+                      ? record.messages[0]?.content ?? "No messages"
+                      : "No messages")}
                 </Text>
               </View>
               <Ionicons

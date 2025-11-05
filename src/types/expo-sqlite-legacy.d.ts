@@ -1,4 +1,4 @@
-declare module 'expo-sqlite/legacy' {
+declare module "expo-sqlite/legacy" {
   export interface SQLResultSet {
     rows: {
       length: number;
@@ -24,5 +24,11 @@ declare module 'expo-sqlite/legacy' {
     ): void;
   }
 
-  export function openDatabase(name: string): SQLiteDatabase;
+  export function openDatabase(
+    name: string,
+    version?: string,
+    description?: string,
+    size?: number,
+    callback?: (db: SQLiteDatabase) => void
+  ): SQLiteDatabase;
 }

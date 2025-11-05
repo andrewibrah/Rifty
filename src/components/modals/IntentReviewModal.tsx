@@ -10,11 +10,15 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { IntentReviewTicket } from "../../hooks/useChatState";
-import { allIntentDefinitions, getIntentById } from "../../constants/intents";
-import type { AppIntent } from "../../constants/intents";
+import {
+  allIntentDefinitions,
+  getIntentById,
+  type AppIntent,
+} from "../../constants/intents";
 import { logIntentAudit } from "../../services/data";
 import { getColors, radii, spacing, typography, shadows } from "../../theme";
 import { useTheme } from "../../contexts/ThemeContext";
+import { nanoid } from "@/agent/utils/nanoid";
 
 interface IntentReviewModalProps {
   visible: boolean;
@@ -42,7 +46,21 @@ const IntentReviewModal: React.FC<IntentReviewModalProps> = ({
 
   if (!review) return null;
 
-  const predictedDefinition = getIntentById(review.intent.id as AppIntent);
+  const isKnownIntent = (value: string): value is AppIntent =>
+    allIntentDefinitions.some((definition) => definition.id === value);
+
+  const normalizedIntentId: AppIntent = isKnownIntent(review.intent.id)
+    ? review.intent.id
+    : "unknown";
+
+  if (!isKnownIntent(review.intent.id)) {
+    console.error(
+      "[IntentReviewModal] Invalid intent ID",
+      review.intent.id
+    );
+  }
+
+  const predictedDefinition = getIntentById(normalizedIntentId);
 
   const handleSubmitFeedback = async (
     correctIntent: string,
@@ -70,7 +88,11 @@ const IntentReviewModal: React.FC<IntentReviewModalProps> = ({
   const handleSubmitCustomIntent = () => {
     const value = customIntentValue.trim();
     if (!value) return;
-    const customId = `custom:${Date.now()}`;
+    const randomId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : nanoid();
+    const customId = `custom:${randomId}`;
     handleSubmitFeedback(customId, value);
   };
 

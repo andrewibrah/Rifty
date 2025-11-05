@@ -1,7 +1,25 @@
-// @ts-nocheck
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { buildReceiptsFooter } from '@/services/mainChat';
 import type { SynthesisResult } from '@/services/mainChat';
+
+vi.mock('expo-constants', () => ({
+  __esModule: true,
+  default: {
+    expoConfig: { extra: {} },
+    manifest2: { extra: {} },
+  },
+}));
+
+vi.mock('expo-modules-core', () => ({
+  __esModule: true,
+  EventEmitter: class EventEmitter {},
+  NativeModulesProxy: {},
+}));
+
+const globalAny = globalThis as typeof globalThis & { __DEV__?: boolean };
+if (globalAny.__DEV__ === undefined) {
+  globalAny.__DEV__ = false;
+}
 
 const baseSynthesis: SynthesisResult = {
   diagnosis: 'baseline',

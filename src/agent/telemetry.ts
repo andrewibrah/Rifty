@@ -5,6 +5,22 @@ import type { RouteDecision } from '@/agent/types';
 const STORAGE_KEY = 'riflett_traces_v2';
 const MAX_TRACES = 100;
 
+let storageLock = Promise.resolve<void>(undefined);
+
+const withStorageLock = async <T>(task: () => Promise<T>): Promise<T> => {
+  let release: (() => void) | null = null;
+  const next = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const previous = storageLock;
+  storageLock = previous.then(() => next);
+  try {
+    await previous;
+    return await task();
+  } finally {
+    release?.();
+  }
+};
 export interface RetrievalTelemetry {
   id: string;
   kind: string;
@@ -88,35 +104,39 @@ export const Telemetry = {
     redactionSummary: Record<string, number>;
     startedAt: number;
   }): Promise<string> {
-    const traces = await loadTraces();
-    const id = nanoid();
-    traces.unshift({
-      id,
-      ts: Date.now(),
-      maskedUserText: params.maskedUserText,
-      intentLabel: params.intentLabel,
-      intentConfidence: params.intentConfidence,
-      decision: params.decision,
-      retrieval: params.retrieval,
-      redactionSummary: params.redactionSummary,
-      latencyMs: Date.now() - params.startedAt,
-      planner: null,
-      action: null,
+    return withStorageLock(async () => {
+      const traces = await loadTraces();
+      const id = nanoid();
+      traces.unshift({
+        id,
+        ts: Date.now(),
+        maskedUserText: params.maskedUserText,
+        intentLabel: params.intentLabel,
+        intentConfidence: params.intentConfidence,
+        decision: params.decision,
+        retrieval: params.retrieval,
+        redactionSummary: params.redactionSummary,
+        latencyMs: Date.now() - params.startedAt,
+        planner: null,
+        action: null,
+      });
+      await saveTraces(traces);
+      return id;
     });
-    await saveTraces(traces);
-    return id;
   },
 
   async update(id: string, patch: Partial<TraceEvent>): Promise<void> {
-    const traces = await loadTraces();
-    const next = traces.map((trace) =>
-      trace.id === id
-        ? {
-            ...trace,
-            ...patch,
-          }
-        : trace
-    );
-    await saveTraces(next);
+    await withStorageLock(async () => {
+      const traces = await loadTraces();
+      const next = traces.map((trace) =>
+        trace.id === id
+          ? {
+              ...trace,
+              ...patch,
+            }
+          : trace
+      );
+      await saveTraces(next);
+    });
   },
 };

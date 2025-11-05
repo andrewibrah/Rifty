@@ -51,7 +51,7 @@ const toPersistedFacts = (learned: string): PersistedFactInput[] => {
   }
   const lines = learned
     .split(/\n+/)
-    .map((line) => line.replace(/^[\s*•\-]+/, "").trim())
+    .map((line) => line.replace(/^[\s*•-]+/, "").trim())
     .filter((line) => line.length > 0);
 
   return lines.map((line) => {
@@ -75,23 +75,19 @@ const logActionEvent = async (
   subjectId: string | null,
   payload: Record<string, unknown>
 ): Promise<void> => {
-  try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user?.id) {
-      return;
-    }
-    await supabase.from("events").insert({
-      user_id: user.id,
-      type,
-      subject_type: subjectType,
-      subject_id: subjectId,
-      payload,
-    });
-  } catch (error) {
-    throw error;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.id) {
+    return;
   }
+  await supabase.from("events").insert({
+    user_id: user.id,
+    type,
+    subject_type: subjectType,
+    subject_id: subjectId,
+    payload,
+  });
 };
 
 type PlannerGoalShape = {
@@ -520,7 +516,7 @@ export const useChatState = (
           id: message.id,
           messages: [message],
           timestamp: message.created_at,
-          type: message.kind === "entry" ? "entry" : "bot",
+          type: message.kind === "entry" || message.kind === "query" ? "entry" : "bot",
         };
         groups.push(currentGroup);
       }
@@ -584,10 +580,9 @@ export const useChatState = (
 
       if (isQuery) {
         // Analyst mode: answer the question
-        const userMessage: BotMessage = {
+        const userMessage: ChatMessage = {
           id: tempId,
-          kind: "bot",
-          afterId: tempId,
+          kind: "query",
           content: trimmedContent,
           created_at: new Date().toISOString(),
           status: "sending",
@@ -656,8 +651,6 @@ export const useChatState = (
         };
 
         advanceTimeline("knowledge_search", "running", "Analyzing intent");
-
-        let createdEntryId: string | null = null;
 
         try {
           const intentPayload = await handleMessage(trimmedContent);

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import {
   View,
   Text,
@@ -76,6 +76,7 @@ const GoalsStep: React.FC<GoalsStepProps> = ({
   const { themeMode } = useTheme();
   const colors = getColors(themeMode);
   const styles = createStyles(colors);
+  const goalOptionsSet = useMemo(() => new Set(goalOptions), [goalOptions]);
 
   const toggleGoal = (goal: GoalKey) => {
     if (selectedGoals.includes(goal)) {
@@ -133,7 +134,7 @@ const GoalsStep: React.FC<GoalsStepProps> = ({
 
         {/* Display custom goals */}
         {selectedGoals
-          .filter((goal) => !goalOptions.includes(goal as any))
+          .filter((goal) => !goalOptionsSet.has(goal))
           .map((goal, index) => (
             <View key={`custom-${goal}-${index}`} style={styles.customGoalChip}>
               <Text style={styles.customGoalText}>{prettyGoal(goal)}</Text>

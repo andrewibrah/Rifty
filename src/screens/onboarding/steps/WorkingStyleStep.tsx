@@ -45,7 +45,6 @@ const WorkingStyleStep: React.FC<WorkingStyleStepProps> = ({
     value: number;
     onValueChange: (value: number) => void;
   }> = ({ label, value, onValueChange }) => {
-    const [isDragging, setIsDragging] = useState(false);
     const screenWidth = Dimensions.get("window").width;
     const sliderWidth = screenWidth - spacing.lg * 2 - spacing.md * 2; // Account for padding
     const thumbSize = 24;

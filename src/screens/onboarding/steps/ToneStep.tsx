@@ -1,11 +1,11 @@
-import React, { useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Switch,
-  Dimensions,
+  PanResponder,
 } from "react-native";
 import { getColors, spacing, radii, typography } from "@/theme";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -48,19 +48,54 @@ const ToneStep: React.FC<ToneStepProps> = ({
     value: number;
     onValueChange: (value: number) => void;
   }> = ({ label, value, onValueChange }) => {
+    const [trackWidth, setTrackWidth] = useState(0);
     const [isDragging, setIsDragging] = useState(false);
-    const screenWidth = Dimensions.get("window").width;
-    const sliderWidth = screenWidth - spacing.lg * 2 - spacing.md * 2; // Account for padding
+    const sliderWidth = Math.max(trackWidth, 0);
     const thumbSize = 24;
 
-    const handlePress = (event: any) => {
-      const { locationX } = event.nativeEvent;
-      const newValue = Math.round((locationX / sliderWidth) * 10);
-      const clampedValue = Math.max(1, Math.min(10, newValue));
-      onValueChange(clampedValue);
-    };
+    const updateValueFromPosition = useCallback(
+      (position: number) => {
+        if (sliderWidth <= 0) return;
+        const clampedPosition = Math.min(
+          Math.max(position, 0),
+          sliderWidth
+        );
+        const ratio = clampedPosition / sliderWidth;
+        const newValue = Math.round(ratio * 9) + 1;
+        const clampedValue = Math.min(10, Math.max(1, newValue));
+        onValueChange(clampedValue);
+      },
+      [onValueChange, sliderWidth]
+    );
 
-    const thumbPosition = ((value - 1) / 9) * (sliderWidth - thumbSize);
+    const panResponder = useMemo(
+      () =>
+        PanResponder.create({
+          onStartShouldSetPanResponder: () => true,
+          onMoveShouldSetPanResponder: () => true,
+          onPanResponderGrant: (evt) => {
+            setIsDragging(true);
+            updateValueFromPosition(evt.nativeEvent.locationX ?? 0);
+          },
+          onPanResponderMove: (evt) => {
+            updateValueFromPosition(evt.nativeEvent.locationX ?? 0);
+          },
+          onPanResponderRelease: (evt) => {
+            updateValueFromPosition(evt.nativeEvent.locationX ?? 0);
+            setIsDragging(false);
+          },
+          onPanResponderTerminate: (evt) => {
+            updateValueFromPosition(evt.nativeEvent.locationX ?? 0);
+            setIsDragging(false);
+          },
+        }),
+      [updateValueFromPosition]
+    );
+
+    const ratio = (value - 1) / 9;
+    const thumbTravel = Math.max(sliderWidth - thumbSize, 0);
+    const thumbPosition = ratio * thumbTravel;
+    const fillWidth = sliderWidth * ratio;
 
     const labelParts = label.split("\n");
     const mainLabel = labelParts[0];
@@ -76,20 +111,26 @@ const ToneStep: React.FC<ToneStepProps> = ({
           <Text style={styles.sliderValue}>{value}</Text>
         </View>
         <View style={styles.sliderContainer}>
-          <TouchableOpacity
+          <View
             style={styles.sliderTrack}
-            onPress={handlePress}
-            activeOpacity={1}
+            onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+            {...panResponder.panHandlers}
           >
             <View style={styles.sliderTrackBackground} />
             <View
               style={[
                 styles.sliderTrackFill,
-                { width: `${((value - 1) / 9) * 100}%` },
+                { width: fillWidth },
               ]}
             />
-            <View style={[styles.sliderThumb, { left: thumbPosition }]} />
-          </TouchableOpacity>
+            <View
+              style={[
+                styles.sliderThumb,
+                isDragging && styles.sliderThumbActive,
+                { left: thumbPosition },
+              ]}
+            />
+          </View>
           <View style={styles.sliderLabels}>
             <Text style={styles.sliderMinLabel}>1</Text>
             <Text style={styles.sliderMaxLabel}>10</Text>
@@ -148,8 +189,8 @@ const ToneStep: React.FC<ToneStepProps> = ({
                   {option === "soft"
                     ? "Soft"
                     : option === "neutral"
-                      ? "Neutral"
-                      : "Direct"}
+                    ? "Neutral"
+                    : "Direct"}
                 </Text>
               </TouchableOpacity>
             );
@@ -174,8 +215,8 @@ const ToneStep: React.FC<ToneStepProps> = ({
                   {option === "freeform"
                     ? "Freeform"
                     : option === "structured"
-                      ? "Structured"
-                      : "Mixed"}
+                    ? "Structured"
+                    : "Mixed"}
                 </Text>
               </TouchableOpacity>
             );
@@ -287,6 +328,7 @@ const createStyles = (colors: any) =>
       backgroundColor: colors.accent,
       borderRadius: 4,
       top: 16,
+      left: 0,
     },
     sliderThumb: {
       position: "absolute",
@@ -302,6 +344,9 @@ const createStyles = (colors: any) =>
       shadowOpacity: 0.2,
       shadowRadius: 4,
       elevation: 4,
+    },
+    sliderThumbActive: {
+      transform: [{ scale: 1.05 }],
     },
     sliderLabels: {
       flexDirection: "row",

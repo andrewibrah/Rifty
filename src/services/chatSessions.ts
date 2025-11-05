@@ -92,7 +92,25 @@ export async function updateChatSession(
   id: string,
   updates: ChatSessionUpdate
 ): Promise<ChatSessionRecord> {
-  await requireUserId()
+  const userId = await requireUserId()
+
+  const { data: session, error: fetchError } = await supabase
+    .from('chat_sessions')
+    .select()
+    .eq('id', id)
+    .maybeSingle()
+
+  if (fetchError) {
+    throw fetchError
+  }
+
+  if (!session) {
+    throw new Error('Chat session not found')
+  }
+
+  if (session.user_id !== userId) {
+    throw new Error('Not authorized to update this chat session')
+  }
 
   const payload: Record<string, any> = {}
 
@@ -117,32 +135,23 @@ export async function updateChatSession(
   }
 
   if (Object.keys(payload).length === 0) {
-    const { data, error } = await supabase
-      .from('chat_sessions')
-      .select()
-      .eq('id', id)
-      .maybeSingle()
-
-    if (error) {
-      throw error
-    }
-
-    if (!data) {
-      throw new Error('Chat session not found')
-    }
-
-    return data as ChatSessionRecord
+    return session as ChatSessionRecord
   }
 
   const { data, error } = await supabase
     .from('chat_sessions')
     .update(payload)
     .eq('id', id)
+    .eq('user_id', userId)
     .select()
-    .single()
+    .maybeSingle()
 
   if (error) {
     throw error
+  }
+
+  if (!data) {
+    throw new Error('Chat session not found')
   }
 
   return data as ChatSessionRecord

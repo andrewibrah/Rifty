@@ -18,21 +18,34 @@ const flushQueue = async () => {
     const queue: QueuedSignal[] = JSON.parse(raw)
     if (!queue.length) return
 
-    const pending = [...queue]
     const {
       data: { user },
     } = await supabase.auth.getUser()
     if (!user) return
-    for (const item of pending) {
-      await supabase.from('persona_signals').insert({
-        user_id: user.id,
-        rationale: item.rationale,
-        source: item.payload.source,
-        payload: item.payload,
-      })
+    const remaining: QueuedSignal[] = []
+    for (const item of queue) {
+      try {
+        const { error } = await supabase.from('persona_signals').insert({
+          user_id: user.id,
+          rationale: item.rationale,
+          source: item.payload.source,
+          payload: item.payload,
+        })
+        if (error) {
+          console.warn('Failed to insert persona signal, re-queueing', error)
+          remaining.push(item)
+        }
+      } catch (insertError) {
+        console.warn('Persona signal insert threw, re-queueing', insertError)
+        remaining.push(item)
+      }
     }
 
-    await AsyncStorage.removeItem(QUEUE_KEY)
+    if (remaining.length > 0) {
+      await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining))
+    } else {
+      await AsyncStorage.removeItem(QUEUE_KEY)
+    }
   } catch (error) {
     console.warn('Failed to flush persona signal queue', error)
   }

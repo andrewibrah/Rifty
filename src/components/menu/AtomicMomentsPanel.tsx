@@ -31,6 +31,7 @@ const AtomicMomentsPanel: React.FC<AtomicMomentsPanelProps> = ({ onClose }) => {
   const [moments, setMoments] = useState<AtomicMomentRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isInitialMount, setIsInitialMount] = useState(true);
 
   const load = useCallback(async (searchTerm?: string) => {
     setLoading(true);
@@ -52,15 +53,17 @@ const AtomicMomentsPanel: React.FC<AtomicMomentsPanelProps> = ({ onClose }) => {
 
   useEffect(() => {
     load();
+    setIsInitialMount(false);
   }, [load]);
 
   useEffect(() => {
+    if (isInitialMount) return;
     const timeout = setTimeout(() => {
       const trimmed = query.trim();
       load(trimmed.length > 0 ? trimmed : undefined);
     }, 350);
     return () => clearTimeout(timeout);
-  }, [query, load]);
+  }, [query, load, isInitialMount]);
 
   const renderItem = ({ item }: { item: AtomicMomentRecord }) => (
     <View style={styles.momentCard}>

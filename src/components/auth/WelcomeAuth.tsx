@@ -39,8 +39,17 @@ export default function WelcomeAuth({
       <View style={styles.welcomeContainer}>
         <View style={styles.authOptionsContainer}>
           <TouchableOpacity
-            style={[styles.authButton, styles.emailButton]}
-            onPress={onEmailSignUp}
+            style={[
+              styles.authButton,
+              styles.emailButton,
+              loading && styles.authButtonDisabled,
+            ]}
+            onPress={() => {
+              if (loading) return;
+              onEmailSignUp();
+            }}
+            disabled={loading}
+            accessibilityState={{ busy: loading, disabled: loading }}
           >
             <View style={styles.authButtonIcon}>
               <Ionicons
@@ -55,9 +64,17 @@ export default function WelcomeAuth({
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.authButton, styles.googleButton]}
-            onPress={onGoogleAuth}
+            style={[
+              styles.authButton,
+              styles.googleButton,
+              loading && styles.authButtonDisabled,
+            ]}
+            onPress={() => {
+              if (loading) return;
+              onGoogleAuth();
+            }}
             disabled={loading}
+            accessibilityState={{ busy: loading, disabled: loading }}
           >
             <View style={styles.authButtonIcon}>
               <Ionicons
@@ -72,9 +89,17 @@ export default function WelcomeAuth({
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.authButton, styles.appleButton]}
-            onPress={onAppleAuth}
+            style={[
+              styles.authButton,
+              styles.appleButton,
+              loading && styles.authButtonDisabled,
+            ]}
+            onPress={() => {
+              if (loading) return;
+              onAppleAuth();
+            }}
             disabled={loading}
+            accessibilityState={{ busy: loading, disabled: loading }}
           >
             <View style={styles.authButtonIcon}>
               <Ionicons
@@ -91,10 +116,25 @@ export default function WelcomeAuth({
 
         {/* Simple Log In Button */}
         <TouchableOpacity
-          style={[styles.simpleLoginButton]}
-          onPress={onSimpleLogin}
+          style={[
+            styles.simpleLoginButton,
+            loading && styles.simpleLoginButtonDisabled,
+          ]}
+          onPress={() => {
+            if (loading) return;
+            onSimpleLogin();
+          }}
+          disabled={loading}
+          accessibilityState={{ busy: loading, disabled: loading }}
         >
-          <Text style={styles.simpleLoginText}>Log In</Text>
+          <Text
+            style={[
+              styles.simpleLoginText,
+              loading && styles.simpleLoginTextDisabled,
+            ]}
+          >
+            Log In
+          </Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -179,11 +219,20 @@ const createStyles = (colors: any) =>
       minHeight: 48,
       ...shadows.glass,
     },
+    simpleLoginButtonDisabled: {
+      opacity: 0.6,
+    },
     simpleLoginText: {
       fontFamily: typography.button.fontFamily,
       fontWeight: typography.button.fontWeight,
       letterSpacing: typography.button.letterSpacing,
       fontSize: 16,
       color: colors.background,
+    },
+    simpleLoginTextDisabled: {
+      color: colors.textSecondary,
+    },
+    authButtonDisabled: {
+      opacity: 0.6,
     },
   });

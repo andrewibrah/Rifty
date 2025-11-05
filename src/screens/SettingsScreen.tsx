@@ -70,11 +70,11 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({
           {/* Account Section */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Account</Text>
-          <View style={styles.settingsCard}>
-            <View style={styles.settingRow}>
-              <View style={styles.iconContainer}>
-                <Ionicons
-                  name="person-outline"
+            <View style={styles.settingsCard}>
+              <View style={styles.settingRow}>
+                <View style={styles.iconContainer}>
+                  <Ionicons
+                    name="person-outline"
                     size={18}
                     color={colors.accent}
                   />
@@ -84,37 +84,40 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({
                   <Text style={styles.settingValue}>
                     {session?.user?.email}
                   </Text>
+                </View>
               </View>
-            </View>
-            <View style={styles.divider} />
-            <View style={styles.settingRow}>
-              <View style={styles.iconContainer}>
-                <Ionicons
-                  name="flame-outline"
-                  size={18}
-                  color={colors.accent}
-                />
+              <View style={styles.divider} />
+              <View style={styles.settingRow}>
+                <View style={styles.iconContainer}>
+                  <Ionicons
+                    name="flame-outline"
+                    size={18}
+                    color={colors.accent}
+                  />
+                </View>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingLabel}>Current streak</Text>
+                  <Text style={styles.settingValue}>{`${currentStreak} day${
+                    currentStreak === 1 ? "" : "s"
+                  }`}</Text>
+                </View>
               </View>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>Current streak</Text>
-                <Text style={styles.settingValue}>{`${currentStreak} day${currentStreak === 1 ? "" : "s"}`}</Text>
-              </View>
-            </View>
-            <View style={styles.settingRow}>
-              <View style={styles.iconContainer}>
-                <Ionicons
-                  name="alert-circle-outline"
-                  size={18}
-                  color={colors.accent}
-                />
-              </View>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>Missed days</Text>
-                <Text style={styles.settingValue}>{missedDayCount}</Text>
+              <View style={styles.divider} />
+              <View style={styles.settingRow}>
+                <View style={styles.iconContainer}>
+                  <Ionicons
+                    name="alert-circle-outline"
+                    size={18}
+                    color={colors.accent}
+                  />
+                </View>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingLabel}>Missed days</Text>
+                  <Text style={styles.settingValue}>{missedDayCount}</Text>
+                </View>
               </View>
             </View>
           </View>
-        </View>
 
           {/* Preferences Section */}
           <View style={styles.section}>
@@ -155,8 +158,8 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({
                       isSystemTheme
                         ? "phone-portrait-outline"
                         : isDark
-                          ? "moon-outline"
-                          : "sunny-outline"
+                        ? "moon-outline"
+                        : "sunny-outline"
                     }
                     size={18}
                     color={colors.accent}
@@ -184,17 +187,21 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({
               style={styles.dangerButton}
               onPress={() => supabase.auth.signOut()}
             >
-          <Ionicons name="log-out-outline" size={18} color={colors.error} />
-          <Text style={styles.dangerButtonText}>Sign Out</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.exportButton}
-          onPress={exportUserData}
-        >
-          <Ionicons name="cloud-download-outline" size={18} color={colors.accent} />
-          <Text style={styles.exportButtonText}>Export my data</Text>
-        </TouchableOpacity>
-      </View>
+              <Ionicons name="log-out-outline" size={18} color={colors.error} />
+              <Text style={styles.dangerButtonText}>Sign Out</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.exportButton}
+              onPress={exportUserData}
+            >
+              <Ionicons
+                name="cloud-download-outline"
+                size={18}
+                color={colors.accent}
+              />
+              <Text style={styles.exportButtonText}>Export my data</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </SafeAreaView>
     </View>

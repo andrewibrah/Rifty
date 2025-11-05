@@ -1,39 +1,40 @@
-import { supabase } from '../lib/supabase'
+import { fromZonedTime } from "date-fns-tz";
+import { supabase } from "../lib/supabase";
 import type {
   CheckIn,
   CheckInType,
   CreateCheckInParams,
   CompleteCheckInParams,
-} from '../types/mvp'
+} from "../types/mvp";
 
 const MORNING_PROMPTS = [
-  'One priority, one constraint?',
-  'What matters most today?',
-  'What would make today meaningful?',
-  'Where will you focus today?',
-]
+  "One priority, one constraint?",
+  "What matters most today?",
+  "What would make today meaningful?",
+  "Where will you focus today?",
+];
 
 const EVENING_PROMPTS = [
-  'One win, one lesson?',
-  'What went well today?',
-  'What did you learn today?',
-  'What are you grateful for?',
-]
+  "One win, one lesson?",
+  "What went well today?",
+  "What did you learn today?",
+  "What are you grateful for?",
+];
 
 const WEEKLY_PROMPT = `Weekly reflection:
 - What themes emerged?
 - Top blockers?
 - Progress on goals?
-- Focus for next week?`
+- Focus for next week?`;
 
 function pickRandomPrompt(prompts: readonly string[]): string {
   if (prompts.length === 0) {
-    throw new Error('No prompts configured for the requested check-in type.')
+    throw new Error("No prompts configured for the requested check-in type.");
   }
 
-  const idx = Math.floor(Math.random() * prompts.length)
-  const fallback = prompts[0]!
-  return prompts[idx] ?? fallback
+  const idx = Math.floor(Math.random() * prompts.length);
+  const fallback = prompts[0]!;
+  return prompts[idx] ?? fallback;
 }
 
 /**
@@ -41,15 +42,15 @@ function pickRandomPrompt(prompts: readonly string[]): string {
  */
 function getPromptForType(type: CheckInType): string {
   switch (type) {
-    case 'daily_morning':
-      return pickRandomPrompt(MORNING_PROMPTS)
-    case 'daily_evening':
-      return pickRandomPrompt(EVENING_PROMPTS)
-    case 'weekly':
-      return WEEKLY_PROMPT
+    case "daily_morning":
+      return pickRandomPrompt(MORNING_PROMPTS);
+    case "daily_evening":
+      return pickRandomPrompt(EVENING_PROMPTS);
+    case "weekly":
+      return WEEKLY_PROMPT;
   }
   // Fallback to a safe default to satisfy the return type.
-  return WEEKLY_PROMPT
+  return WEEKLY_PROMPT;
 }
 
 /**
@@ -61,14 +62,14 @@ export async function createCheckIn(
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    throw new Error('User not authenticated')
+    throw new Error("User not authenticated");
   }
 
   const { data, error } = await supabase
-    .from('check_ins')
+    .from("check_ins")
     .insert({
       user_id: user.id,
       type: params.type,
@@ -76,14 +77,14 @@ export async function createCheckIn(
       scheduled_for: params.scheduled_for,
     })
     .select()
-    .single()
+    .single();
 
   if (error) {
-    console.error('[createCheckIn] Error:', error)
-    throw error
+    console.error("[createCheckIn] Error:", error);
+    throw error;
   }
 
-  return data as CheckIn
+  return data as CheckIn;
 }
 
 /**
@@ -95,14 +96,14 @@ export async function getPendingCheckIn(
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    throw new Error('User not authenticated')
+    throw new Error("User not authenticated");
   }
 
-  const now = new Date()
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const endOfDay = new Date(
     now.getFullYear(),
     now.getMonth(),
@@ -110,23 +111,23 @@ export async function getPendingCheckIn(
     23,
     59,
     59
-  )
+  );
 
   let query = supabase
-    .from('check_ins')
-    .select('*')
-    .eq('user_id', user.id)
-    .is('completed_at', null)
-    .gte('scheduled_for', startOfDay.toISOString())
-    .lte('scheduled_for', endOfDay.toISOString())
-    .order('scheduled_for', { ascending: true })
-    .limit(1)
+    .from("check_ins")
+    .select("*")
+    .eq("user_id", user.id)
+    .is("completed_at", null)
+    .gte("scheduled_for", startOfDay.toISOString())
+    .lte("scheduled_for", endOfDay.toISOString())
+    .order("scheduled_for", { ascending: true })
+    .limit(1);
 
   if (type) {
-    query = query.eq('type', type)
+    query = query.eq("type", type);
   }
 
-  const { data, error } = await query.maybeSingle()
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     // If the database doesn't have the `check_ins` table (migrations not applied),
@@ -134,24 +135,25 @@ export async function getPendingCheckIn(
     // friendly warning and return `null` (no pending check-in) instead of crashing
     // the whole app. This makes the app more resilient when running against a
     // local or empty Supabase instance.
-    const errAny = error as any
+    const errAny = error as any;
     const isMissingTable =
-      typeof errAny?.code === 'string' &&
-      (errAny.code === 'PGRST205' || /could not find the table .*check_ins/i.test(errAny.message ?? ''))
+      typeof errAny?.code === "string" &&
+      (errAny.code === "PGRST205" ||
+        /could not find the table .*check_ins/i.test(errAny.message ?? ""));
 
     if (isMissingTable) {
       console.warn(
-        '[getPendingCheckIn] Supabase table not found: check_ins. Returning null. '
-          + 'This usually means migrations have not been applied to the connected database.'
-      )
-      return null
+        "[getPendingCheckIn] Supabase table not found: check_ins. Returning null. " +
+          "This usually means migrations have not been applied to the connected database."
+      );
+      return null;
     }
 
-    console.error('[getPendingCheckIn] Error:', error)
-    throw error
+    console.error("[getPendingCheckIn] Error:", error);
+    throw error;
   }
 
-  return data as CheckIn | null
+  return data as CheckIn | null;
 }
 
 /**
@@ -164,47 +166,49 @@ export async function completeCheckIn(
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    throw new Error('User not authenticated')
+    throw new Error("User not authenticated");
   }
 
   const { data, error } = await supabase
-    .from('check_ins')
+    .from("check_ins")
     .update({
       response: params.response,
       response_entry_id: params.response_entry_id ?? null,
       completed_at: new Date().toISOString(),
     })
-    .eq('id', checkInId)
-    .eq('user_id', user.id)
+    .eq("id", checkInId)
+    .eq("user_id", user.id)
     .select()
-    .single()
+    .single();
 
   if (error) {
-    console.error('[completeCheckIn] Error:', error)
-    throw error
+    console.error("[completeCheckIn] Error:", error);
+    throw error;
   }
 
-  return data as CheckIn
+  return data as CheckIn;
 }
 
 /**
  * Schedule daily check-ins for a user
  */
-export async function scheduleDailyCheckIns(timezone: string = 'UTC'): Promise<void> {
+export async function scheduleDailyCheckIns(
+  timezone: string = "UTC"
+): Promise<void> {
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    throw new Error('User not authenticated')
+    throw new Error("User not authenticated");
   }
 
-  const now = new Date()
-  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+  const now = new Date();
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
   // Morning check-in at 8 AM
   const morningTime = new Date(
@@ -214,7 +218,7 @@ export async function scheduleDailyCheckIns(timezone: string = 'UTC'): Promise<v
     8,
     0,
     0
-  )
+  );
 
   // Evening check-in at 8 PM
   const eveningTime = new Date(
@@ -224,40 +228,45 @@ export async function scheduleDailyCheckIns(timezone: string = 'UTC'): Promise<v
     20,
     0,
     0
-  )
+  );
+
+  const morningTimeUtc = fromZonedTime(morningTime, timezone);
+  const eveningTimeUtc = fromZonedTime(eveningTime, timezone);
 
   await Promise.all([
     createCheckIn({
-      type: 'daily_morning',
-      prompt: getPromptForType('daily_morning'),
-      scheduled_for: morningTime.toISOString(),
+      type: "daily_morning",
+      prompt: getPromptForType("daily_morning"),
+      scheduled_for: morningTimeUtc.toISOString(),
     }),
     createCheckIn({
-      type: 'daily_evening',
-      prompt: getPromptForType('daily_evening'),
-      scheduled_for: eveningTime.toISOString(),
+      type: "daily_evening",
+      prompt: getPromptForType("daily_evening"),
+      scheduled_for: eveningTimeUtc.toISOString(),
     }),
-  ])
+  ]);
 }
 
 /**
  * Schedule weekly check-in
  */
-export async function scheduleWeeklyCheckIn(timezone: string = 'UTC'): Promise<void> {
+export async function scheduleWeeklyCheckIn(
+  timezone: string = "UTC"
+): Promise<void> {
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    throw new Error('User not authenticated')
+    throw new Error("User not authenticated");
   }
 
-  const now = new Date()
-  const daysUntilSunday = (7 - now.getDay()) % 7
+  const now = new Date();
+  const daysUntilSunday = (7 - now.getDay()) % 7 || 7;
   const nextSunday = new Date(
     now.getTime() + daysUntilSunday * 24 * 60 * 60 * 1000
-  )
+  );
 
   // Sunday at 6 PM
   const weeklyTime = new Date(
@@ -267,54 +276,58 @@ export async function scheduleWeeklyCheckIn(timezone: string = 'UTC'): Promise<v
     18,
     0,
     0
-  )
+  );
+
+  const weeklyTimeUtc = fromZonedTime(weeklyTime, timezone);
 
   await createCheckIn({
-    type: 'weekly',
-    prompt: getPromptForType('weekly'),
-    scheduled_for: weeklyTime.toISOString(),
-  })
+    type: "weekly",
+    prompt: getPromptForType("weekly"),
+    scheduled_for: weeklyTimeUtc.toISOString(),
+  });
 }
 
 /**
  * List all check-ins
  */
-export async function listCheckIns(options: {
-  completed?: boolean
-  limit?: number
-} = {}): Promise<CheckIn[]> {
+export async function listCheckIns(
+  options: {
+    completed?: boolean;
+    limit?: number;
+  } = {}
+): Promise<CheckIn[]> {
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    throw new Error('User not authenticated')
+    throw new Error("User not authenticated");
   }
 
-  const limit = options.limit ?? 50
+  const limit = options.limit ?? 50;
 
   let query = supabase
-    .from('check_ins')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('scheduled_for', { ascending: false })
-    .limit(limit)
+    .from("check_ins")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("scheduled_for", { ascending: false })
+    .limit(limit);
 
   if (options.completed !== undefined) {
     if (options.completed) {
-      query = query.not('completed_at', 'is', null)
+      query = query.not("completed_at", "is", null);
     } else {
-      query = query.is('completed_at', null)
+      query = query.is("completed_at", null);
     }
   }
 
-  const { data, error } = await query
+  const { data, error } = await query;
 
   if (error) {
-    console.error('[listCheckIns] Error:', error)
-    throw error
+    console.error("[listCheckIns] Error:", error);
+    throw error;
   }
 
-  return (data ?? []) as CheckIn[]
+  return (data ?? []) as CheckIn[];
 }

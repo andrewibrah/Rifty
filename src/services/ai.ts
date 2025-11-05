@@ -5,15 +5,43 @@ import type {
   IntentPredictionResult,
 } from "../types/intent";
 import type { EnrichedPayload, PlannerResponse } from "@/agent/types";
+import { recordAiEvent } from "./riflettSpine";
+import { gateRequest, type GateResult } from "../../services/ai/gate";
+import { understand, reason } from "../../services/ai/pipeline";
+import {
+  resolvePersona,
+  type PersonaProfile,
+} from "@/services/personaCatalog";
 
-type AIResponse = {
+type RawAIResponse = {
   reply: string;
   learned: string;
   ethical: string;
 };
 
+export interface PlanMetadata {
+  steps: string[];
+  confidence: number | null;
+  route: GateResult["route"];
+  reason: string;
+}
+
+export interface AIMetadata {
+  persona: PersonaProfile;
+  gate: GateResult | null;
+  plan: PlanMetadata;
+  lessonsApplied: string[];
+}
+
+export type AIResponse = RawAIResponse & {
+  aiEventId: string | null;
+  latencyMs: number | null;
+  metadata: AIMetadata;
+};
+
 // Use a model you actually have (from your list)
 const MODEL_NAME = "gpt-4o-mini" as const;
+const SPINE_VERSION = "spine.v1" as const;
 
 const getExpoExtra = () =>
   (Constants?.expoConfig?.extra ?? {}) as Record<string, any>;
@@ -66,7 +94,9 @@ export async function generateAIResponse(params: {
     confidence: number;
     subsystem: string;
   };
+  lessons?: string[];
 }): Promise<AIResponse> {
+  const startedAt = Date.now();
   const ctrl = new AbortController();
   const timeout = setTimeout(() => ctrl.abort(), 45000);
 
@@ -88,11 +118,76 @@ You must emit your final data via the provided tool with keys: reply, learned, e
       `subsystem ${params.intentContext.subsystem}.`
     : "";
 
+  const lessonsBlock =
+    params.lessons && params.lessons.length > 0
+      ? `\nRecent failure lessons to respect:\n${params.lessons
+          .slice(0, 3)
+          .map((lesson, index) => `${index + 1}. ${lesson}`)
+          .join("\n")}`
+      : "";
+
   const userPrompt = `Entry category: ${params.entryType}
 ${intentContext ? `${intentContext}\n` : ""}
 ${context}
 
-New user request: ${params.userMessage}`;
+New user request: ${params.userMessage}${lessonsBlock}`;
+
+  const pipelineContext = {
+    annotations: params.annotations,
+    entryContent: params.entryContent,
+    entryType: params.entryType,
+  };
+
+  let gateResult: GateResult | null = null;
+  let planMetadata: PlanMetadata = {
+    steps: [],
+    confidence: null,
+    route: "gpt_thinking",
+    reason: "",
+  };
+
+  try {
+    gateResult = await gateRequest({
+      userMessage: params.userMessage,
+      context: pipelineContext,
+    });
+    planMetadata = {
+      steps:
+        gateResult.route === "fast_path"
+          ? ["Fast path heuristics handled this directly."]
+          : [],
+      confidence: gateResult.confidence,
+      route: gateResult.route,
+      reason: gateResult.reason,
+    };
+  } catch (gateError) {
+    console.warn("[generateAIResponse] gateRequest failed", gateError);
+  }
+
+  const personaProfile = resolvePersona(gateResult?.intent);
+
+  if (gateResult?.route !== "fast_path") {
+    try {
+      const understandResult = await understand({
+        userMessage: params.userMessage,
+        context: pipelineContext,
+      });
+      const reasonResult = await reason({
+        understandOutput: understandResult,
+        context: pipelineContext,
+      });
+      planMetadata = {
+        ...planMetadata,
+        steps: reasonResult.plan.steps.slice(0, 4),
+        confidence: reasonResult.confidence,
+      };
+    } catch (pipelineError) {
+      console.warn(
+        "[generateAIResponse] pipeline reasoning failed",
+        pipelineError
+      );
+    }
+  }
 
   // Define a single function/tool that encodes the schema we want back
   const tools = [
@@ -180,29 +275,98 @@ New user request: ${params.userMessage}`;
   const toolCall = msg?.tool_calls?.[0];
   const argStr: string | undefined = toolCall?.function?.arguments;
 
+  let rawResponse: RawAIResponse | null = null;
+
   if (!argStr) {
-    // Some models might put JSON into content as fallback; try that too
     const content = typeof msg?.content === "string" ? msg.content : "";
     if (!content) {
       throw new Error("OpenAI response missing tool call and content.");
     }
     try {
-      const parsed = JSON.parse(stripCodeFences(content)) as AIResponse;
-      validateAIResponse(parsed);
-      return parsed;
+      rawResponse = JSON.parse(stripCodeFences(content)) as RawAIResponse;
     } catch {
       throw new Error("Unable to parse OpenAI response as JSON.");
     }
+  } else {
+    try {
+      rawResponse = JSON.parse(argStr) as RawAIResponse;
+    } catch {
+      throw new Error("Unable to parse tool call arguments as JSON.");
+    }
   }
 
-  let parsed: AIResponse;
-  try {
-    parsed = JSON.parse(argStr) as AIResponse;
-  } catch {
-    throw new Error("Unable to parse tool call arguments as JSON.");
+  if (!rawResponse) {
+    throw new Error("AI response payload missing.");
   }
-  validateAIResponse(parsed);
-  return parsed;
+
+  validateAIResponse(rawResponse);
+
+  const latencyMs = Math.max(0, Math.round(Date.now() - startedAt));
+  const truncatedInput =
+    typeof params.userMessage === "string"
+      ? params.userMessage.slice(0, 4000)
+      : "";
+
+  const outputJson = {
+    version: SPINE_VERSION,
+    data: {
+      reply: rawResponse.reply,
+      learned: rawResponse.learned,
+      ethical: rawResponse.ethical,
+    },
+    metadata: {
+      persona: personaProfile.name,
+      route: gateResult?.route ?? null,
+      plan_steps: planMetadata.steps,
+      lessons: params.lessons ?? [],
+    },
+  };
+
+  const metadata: Record<string, unknown> = {
+    entry_type: params.entryType,
+    intent_id: params.intentContext?.id ?? null,
+    intent_label: params.intentContext?.label ?? null,
+    intent_confidence: params.intentContext?.confidence ?? null,
+    intent_subsystem: params.intentContext?.subsystem ?? null,
+    annotation_count: params.annotations.length,
+    persona: personaProfile.name,
+    persona_tone: personaProfile.tone,
+    gate_route: gateResult?.route ?? null,
+    gate_intent: gateResult?.intent ?? null,
+    gate_confidence: gateResult?.confidence ?? null,
+    gate_reason: gateResult?.reason ?? null,
+    plan_steps: planMetadata.steps,
+    plan_confidence: planMetadata.confidence,
+    lessons_applied: params.lessons ?? [],
+  };
+
+  let aiEventId: string | null = null;
+  try {
+    const inserted = await recordAiEvent({
+      intent: params.intentContext?.id ?? params.entryType ?? "unknown",
+      input: truncatedInput,
+      outputJson,
+      latencyMs,
+      model: MODEL_NAME,
+      temperature: 0.7,
+      metadata,
+    });
+    aiEventId = inserted?.id ?? null;
+  } catch (eventError) {
+    console.warn("[generateAIResponse] recordAiEvent failed", eventError);
+  }
+
+  return {
+    ...rawResponse,
+    aiEventId,
+    latencyMs,
+    metadata: {
+      persona: personaProfile,
+      gate: gateResult,
+      plan: planMetadata,
+      lessonsApplied: params.lessons ?? [],
+    },
+  };
 }
 
 function stripCodeFences(s: string) {
@@ -213,7 +377,7 @@ function stripCodeFences(s: string) {
     .trim();
 }
 
-function validateAIResponse(p: any): asserts p is AIResponse {
+function validateAIResponse(p: any): asserts p is RawAIResponse {
   if (!p || typeof p !== "object")
     throw new Error("AI response not an object.");
   for (const k of ["reply", "learned", "ethical"] as const) {
@@ -242,7 +406,7 @@ const ENTRY_NOTE_SCHEMA = {
       },
       searchTag: {
         type: "string",
-        pattern: "^[a-z0-9\-]{2,60}$",
+        pattern: "^[a-z0-9-]{2,60}$",
         description: "Lowercase kebab-case search tag.",
       },
       guidance: {

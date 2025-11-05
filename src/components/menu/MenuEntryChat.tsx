@@ -1,4 +1,11 @@
-import React, { useCallback, useState, useMemo, useEffect } from "react";
+import React, {
+  useCallback,
+  useState,
+  useMemo,
+  useEffect,
+  useReducer,
+  useRef,
+} from "react";
 import {
   View,
   Text,
@@ -19,7 +26,22 @@ import type { Annotation } from "../../types/annotations";
 import type { RemoteJournalEntry, EntryType } from "../../services/data";
 import { appendMessage, updateJournalEntry } from "../../services/data";
 import { supabase } from "../../lib/supabase";
-import { generateAIResponse, formatAnnotationLabel } from "../../services/ai";
+import {
+  generateAIResponse,
+  formatAnnotationLabel,
+} from "../../services/ai";
+import type { AIMetadata } from "../../services/ai";
+import {
+  submitFeedback,
+  rebuildContext,
+  trackFailure,
+  refreshFeedbackStats,
+  type ContextSnapshot,
+  type SubmitFeedbackInput,
+  type FailureTrackerResult,
+  type FailureTrackerInput,
+  riflettAuthErrors,
+} from "../../services/riflettSpine";
 import type { ProcessingStep } from "../../types/intent";
 import type { ProcessingStepId } from "../../types/intent";
 import { getColors, radii, spacing, typography, shadows } from "../../theme";
@@ -28,6 +50,26 @@ import {
   createAtomicMoment,
   type AtomicMomentRecord,
 } from "../../services/atomicMoments";
+import FeedbackControls from "./FeedbackControls";
+import ContextCompassPanel from "./ContextCompassPanel";
+import LessonRibbon, { type LessonItem } from "./LessonRibbon";
+import MetadataToastLayer, {
+  type MetadataToastItem,
+} from "./MetadataToastLayer";
+import { chatStrings } from "@/constants/chatStrings";
+import {
+  feedbackReducer,
+  feedbackReducerInitialState,
+  type FeedbackLabel,
+} from "@/state/feedbackReducer";
+import { buildContextPanelModel } from "@/utils/contextCompass";
+import { retryWithBackoff } from "@/utils/retry";
+import {
+  enqueueSpineOperation,
+  drainSpineQueue,
+  type FeedbackQueueItem,
+  type FailureQueueItem,
+} from "@/services/spineQueue";
 
 interface MenuEntryChatProps {
   entry: RemoteJournalEntry;
@@ -130,6 +172,31 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
   const [emotionsScrollX, setEmotionsScrollX] = useState(0);
   const [emotionsScrollViewWidth, setEmotionsScrollViewWidth] = useState(0);
   const [emotionsContentWidth, setEmotionsContentWidth] = useState(0);
+  const [feedbackState, dispatchFeedback] = useReducer(
+    feedbackReducer,
+    feedbackReducerInitialState
+  );
+  const [lessonRibbonVisible, setLessonRibbonVisible] = useState(false);
+  const [lessonItems, setLessonItems] = useState<LessonItem[]>([]);
+  const lessonsRef = useRef<string[]>([]);
+  const [metadataToasts, setMetadataToasts] = useState<MetadataToastItem[]>([]);
+  const toastIdRef = useRef(0);
+  const [contextSnapshot, setContextSnapshot] = useState<ContextSnapshot | null>(
+    null
+  );
+  const [isContextOpen, setIsContextOpen] = useState(false);
+  const [isContextLoading, setIsContextLoading] = useState(false);
+  const [contextError, setContextError] = useState<string | null>(null);
+  const latestComposerRef = useRef("");
+  const contextDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const lastContextSeedRef = useRef<string>("");
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const statusMessageTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const feedbackCopy = chatStrings.feedback;
+  const contextCopy = chatStrings.context;
+  const lessonsCopy = chatStrings.lessons;
+  const metadataCopy = chatStrings.metadata;
+  const toastCopy = chatStrings.toasts;
 
   // Notify parent component when mode changes
   useEffect(() => {
@@ -186,6 +253,255 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     setSelectedMood(entry.mood ?? null);
     setSelectedFeelings(entry.feeling_tags ?? []);
   }, [entry.id, entry.mood, entry.feeling_tags]);
+
+  useEffect(() => {
+    latestComposerRef.current = composerText;
+  }, [composerText]);
+
+  useEffect(() => {
+    return () => {
+      if (contextDebounceRef.current) {
+        clearTimeout(contextDebounceRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (composerMode !== "ai") {
+      setIsContextOpen(false);
+    }
+  }, [composerMode]);
+
+  const showStatusMessage = useCallback((message: string) => {
+    if (statusMessageTimerRef.current) {
+      clearTimeout(statusMessageTimerRef.current);
+    }
+    setStatusMessage(message);
+    statusMessageTimerRef.current = setTimeout(() => {
+      setStatusMessage(null);
+      statusMessageTimerRef.current = null;
+    }, 3500);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (statusMessageTimerRef.current) {
+        clearTimeout(statusMessageTimerRef.current);
+      }
+    };
+  }, []);
+
+  const addLatencyToast = useCallback(
+    (latency: number | null, aiEventId?: string | null) => {
+      const id = `latency-${toastIdRef.current++}-${Date.now()}`;
+      setMetadataToasts((prev) => [
+        ...prev,
+        {
+          id,
+          latency,
+          aiEventId: aiEventId ?? null,
+          createdAt: Date.now(),
+        },
+      ]);
+    },
+    []
+  );
+
+  const dismissLatencyToast = useCallback((id: string) => {
+    setMetadataToasts((prev) => prev.filter((toast) => toast.id !== id));
+  }, []);
+
+  const processFailureLessons = useCallback(
+    (result: FailureTrackerResult) => {
+      const merged = [result.lesson, ...result.recent_lessons];
+      const unique = merged.reduce<LessonItem[]>((acc, lesson) => {
+        if (!acc.some((item) => item.id === lesson.id)) {
+          acc.push({
+            id: lesson.id,
+            lesson_text: lesson.lesson_text,
+            scope: lesson.scope,
+            created_at: lesson.created_at,
+          });
+        }
+        return acc;
+      }, []);
+
+      const limited = unique.slice(0, 3);
+      setLessonItems(limited);
+      lessonsRef.current = limited.map((item) => item.lesson_text);
+      setLessonRibbonVisible(true);
+    },
+    []
+  );
+
+  const executeFailure = useCallback(
+    async (
+      queueId: string,
+      payload: FailureTrackerInput,
+      options: { fromQueue?: boolean } = {}
+    ) => {
+      try {
+        const result = await retryWithBackoff(() => trackFailure(payload));
+        processFailureLessons(result);
+      } catch (error) {
+        if (options.fromQueue) {
+          throw error instanceof Error ? error : new Error("failure_queue_error");
+        }
+
+        await enqueueSpineOperation({
+          id: queueId,
+          kind: "failure",
+          payload,
+        });
+
+        const message = error instanceof Error ? error.message : "";
+        if (message === riflettAuthErrors.AUTH_MISSING_ERROR) {
+          showStatusMessage(toastCopy.failureQueued);
+        } else {
+          showStatusMessage(toastCopy.failureError);
+        }
+      }
+    },
+    [processFailureLessons, showStatusMessage, toastCopy.failureError, toastCopy.failureQueued]
+  );
+
+  const executeFeedback = useCallback(
+    async (
+      messageId: string,
+      payload: SubmitFeedbackInput,
+      label: FeedbackLabel,
+      options: { fromQueue?: boolean } = {}
+    ) => {
+      dispatchFeedback({ type: "setStatus", messageId, status: "submitting" });
+
+      try {
+        await retryWithBackoff(() => submitFeedback(payload));
+        dispatchFeedback({
+          type: "setStatus",
+          messageId,
+          status: "submitted",
+          error: null,
+        });
+        refreshFeedbackStats().catch((error) => {
+          console.warn("[MenuEntryChat] refreshFeedbackStats failed", error);
+        });
+
+        if (label === "unhelpful") {
+          const failurePayload: FailureTrackerInput = {
+            aiEventId: payload.aiEventId,
+            failure_type: "poor_reasoning",
+            signal:
+              payload.correction?.trim() ||
+              `User marked response as ${label}`,
+            metadata: {
+              tags: payload.tags ?? [],
+            },
+          };
+          await executeFailure(messageId, failurePayload);
+        }
+      } catch (error) {
+        if (options.fromQueue) {
+          dispatchFeedback({
+            type: "setStatus",
+            messageId,
+            status: "error",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Queued feedback failed",
+          });
+          throw error instanceof Error ? error : new Error("feedback_queue_error");
+        }
+
+        await enqueueSpineOperation({
+          id: messageId,
+          kind: "feedback",
+          payload,
+        });
+
+        const message = error instanceof Error ? error.message : "";
+        dispatchFeedback({
+          type: "setStatus",
+          messageId,
+          status: "queued",
+          error:
+            message === riflettAuthErrors.AUTH_MISSING_ERROR
+              ? feedbackCopy.sessionMissing
+              : message || null,
+        });
+
+        if (message === riflettAuthErrors.AUTH_MISSING_ERROR) {
+          showStatusMessage(feedbackCopy.sessionMissing);
+        } else {
+          showStatusMessage(feedbackCopy.queued);
+        }
+      }
+    },
+    [executeFailure, feedbackCopy.queued, feedbackCopy.sessionMissing]
+  );
+
+  const processQueuedFeedback = useCallback(
+    async (item: FeedbackQueueItem) => {
+      await executeFeedback(item.id, item.payload, item.payload.label, {
+        fromQueue: true,
+      });
+    },
+    [executeFeedback]
+  );
+
+  const processQueuedFailure = useCallback(
+    async (item: FailureQueueItem) => {
+      await executeFailure(item.id, item.payload, { fromQueue: true });
+    },
+    [executeFailure]
+  );
+
+  const drainQueuedOnce = useCallback(async () => {
+    try {
+      await drainSpineQueue({
+        feedback: processQueuedFeedback,
+        failure: processQueuedFailure,
+      });
+    } catch (error) {
+      console.warn("[MenuEntryChat] drainSpineQueue failed", error);
+    }
+  }, [processQueuedFeedback, processQueuedFailure]);
+
+  const handleFeedbackSubmit = useCallback(
+    async (messageId: string, aiEventId: string | null | undefined) => {
+      const draft = feedbackState[messageId];
+      if (!draft?.label) {
+        return;
+      }
+
+      if (!aiEventId) {
+        dispatchFeedback({
+          type: "setStatus",
+          messageId,
+          status: "error",
+          error: "Missing AI event id",
+        });
+        return;
+      }
+
+      const payload: SubmitFeedbackInput = {
+        aiEventId,
+        label: draft.label,
+      };
+      const trimmedCorrection = draft.correction.trim();
+      if (trimmedCorrection) {
+        payload.correction = trimmedCorrection;
+      }
+      if (draft.tags.length) {
+        payload.tags = [...draft.tags];
+      }
+
+      await executeFeedback(messageId, payload, draft.label);
+      await drainQueuedOnce();
+    },
+    [drainQueuedOnce, executeFeedback, feedbackState]
+  );
+
 
   const handleMoodSelect = useCallback(
     async (nextMood: string) => {
@@ -289,6 +605,7 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         annotations: updatedAnnotations,
         userMessage: trimmed,
         entryType: entry.type,
+        lessons: lessonsRef.current,
       });
 
       setTimeline("openai_request", "done", "Prompt dispatched");
@@ -304,6 +621,12 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
           learned: aiResult.learned,
           ethical: aiResult.ethical,
           processingTimeline: timeline,
+          ai_event_id: aiResult.aiEventId,
+          latency_ms: aiResult.latencyMs,
+          persona: aiResult.metadata.persona,
+          gate: aiResult.metadata.gate,
+          plan: aiResult.metadata.plan,
+          lessons_applied: aiResult.metadata.lessonsApplied,
         }
       );
 
@@ -314,12 +637,18 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         channel: "ai",
         content: botMessage.content,
         created_at: botMessage.created_at,
-      metadata: {
-        learned: aiResult.learned,
-        ethical: aiResult.ethical,
-        processingTimeline: timeline,
-      },
-    };
+        metadata: {
+          learned: aiResult.learned,
+          ethical: aiResult.ethical,
+          processingTimeline: timeline,
+          ai_event_id: aiResult.aiEventId,
+          latency_ms: aiResult.latencyMs,
+          persona: aiResult.metadata.persona,
+          gate: aiResult.metadata.gate,
+          plan: aiResult.metadata.plan,
+          lessons_applied: aiResult.metadata.lessonsApplied,
+        },
+      };
 
       // Remove thinking message and add actual response
       const finalAnnotations = updatedAnnotations.filter(
@@ -327,6 +656,7 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
       );
       onAnnotationsUpdate([...finalAnnotations, botAnnotation]);
       onErrorUpdate(null);
+      addLatencyToast(aiResult.latencyMs ?? null, aiResult.aiEventId ?? undefined);
     } catch (error) {
       console.error("Error requesting AI guidance", error);
       setTimeline(
@@ -334,6 +664,23 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
         "error",
         error instanceof Error ? error.message : "Unable to contact AI"
       );
+
+      try {
+        await executeFailure(`router-${Date.now()}`, {
+          failure_type: "other",
+          signal:
+            error instanceof Error
+              ? error.message
+              : "Unknown AI guidance failure",
+          metadata: {
+            entry_id: entryId,
+            phase: "generateAIResponse",
+          },
+        });
+        await drainQueuedOnce();
+      } catch (trackerError) {
+        console.warn("[MenuEntryChat] trackFailure failed", trackerError);
+      }
 
       // Remove thinking message on error
       if (thinkingAnnotation) {
@@ -351,7 +698,16 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     } finally {
       setIsWorkingWithAI(false);
     }
-  }, [annotations, composerText, entry, onAnnotationsUpdate, onErrorUpdate]);
+  }, [
+    addLatencyToast,
+    annotations,
+    composerText,
+    drainQueuedOnce,
+    entry,
+    executeFailure,
+    onAnnotationsUpdate,
+    onErrorUpdate,
+  ]);
 
   const handleSaveAtomicMoment = useCallback(
     async (annotation: Annotation) => {
@@ -381,11 +737,114 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     [entry, onRefreshAnnotations]
   );
 
+  const handleFeedbackSelect = useCallback(
+    (messageId: string, label: FeedbackLabel) => {
+      dispatchFeedback({ type: "select", messageId, label });
+    },
+    []
+  );
+
+  const handleFeedbackCorrectionChange = useCallback(
+    (messageId: string, value: string) => {
+      dispatchFeedback({
+        type: "updateCorrection",
+        messageId,
+        correction: value,
+      });
+    },
+    []
+  );
+
+  const handleFeedbackToggleTag = useCallback(
+    (messageId: string, tag: string) => {
+      dispatchFeedback({ type: "toggleTag", messageId, tag });
+    },
+    []
+  );
+
+  const requestContext = useCallback(
+    (seed: string) => {
+      if (contextDebounceRef.current) {
+        clearTimeout(contextDebounceRef.current);
+      }
+
+      const trimmed = seed.trim();
+
+      if (!trimmed) {
+        lastContextSeedRef.current = "";
+        setContextSnapshot(null);
+        setContextError(null);
+        return;
+      }
+
+      if (trimmed === lastContextSeedRef.current) {
+        return;
+      }
+
+      lastContextSeedRef.current = trimmed;
+
+      contextDebounceRef.current = setTimeout(async () => {
+        setIsContextLoading(true);
+        try {
+          const snapshot = await retryWithBackoff(() => rebuildContext(trimmed), {
+            retries: 1,
+          });
+          setContextSnapshot(snapshot);
+          setContextError(null);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "context_failed";
+          if (message === riflettAuthErrors.AUTH_MISSING_ERROR) {
+            showStatusMessage(feedbackCopy.sessionMissing);
+          } else {
+            showStatusMessage(toastCopy.contextError);
+          }
+          setContextError(message);
+        } finally {
+          setIsContextLoading(false);
+        }
+      }, 320);
+    },
+    [feedbackCopy.sessionMissing, showStatusMessage, toastCopy.contextError]
+  );
+
+  useEffect(() => {
+    drainQueuedOnce();
+  }, [drainQueuedOnce]);
+
+  useEffect(() => {
+    if (composerMode !== "ai" || !isContextOpen) {
+      return;
+    }
+    const seed = composerText.trim() || entry?.content || "";
+    if (!seed) {
+      return;
+    }
+    requestContext(seed);
+  }, [composerMode, composerText, entry?.content, isContextOpen, requestContext]);
+
+
   const renderAnnotationItem = useCallback(
     ({ item }: { item: Annotation }) => {
       const isUser = item.kind === "user";
       const isNote = item.channel === "note";
       const label = formatAnnotationLabel(item.channel);
+      const messageId = item.id ?? "";
+      const feedbackDraft = messageId ? feedbackState[messageId] : undefined;
+      const isThinking = item.metadata?.isThinking;
+      const personaMeta =
+        !isUser && item.metadata?.persona
+          ? (item.metadata.persona as AIMetadata["persona"])
+          : null;
+      const gateMeta =
+        !isUser && item.metadata?.gate
+          ? (item.metadata.gate as AIMetadata["gate"])
+          : null;
+      const planMeta =
+        !isUser && item.metadata?.plan
+          ? (item.metadata.plan as AIMetadata["plan"])
+          : null;
+      const aiEventId = item.metadata?.ai_event_id ?? null;
+      const personaLabel = !isUser && personaMeta ? personaMeta.name.toUpperCase() : label;
 
       // Render notes as elegant journal entries
       if (isNote) {
@@ -436,7 +895,6 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
       }
 
       // Render AI chat as bubbles
-      const isThinking = item.metadata?.isThinking;
       return (
         <View
           style={[
@@ -468,8 +926,27 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
                     : styles.annotationLabelOther,
                 ]}
               >
-                {isThinking ? "Riflett" : label}
+                {isThinking ? "Riflett" : personaLabel}
               </Text>
+              {!isUser && !isThinking && (
+                <View style={styles.personaSummary}>
+                  {personaMeta && (
+                    <Text style={styles.personaSummaryText}>
+                      {personaMeta.summary}
+                    </Text>
+                  )}
+                  {gateMeta && (
+                    <Text style={styles.personaGateText}>
+                      {gateMeta.route === "fast_path"
+                        ? "Fast path"
+                        : "Deep reasoning"}
+                      {typeof gateMeta.confidence === "number"
+                        ? ` · ${(gateMeta.confidence * 100).toFixed(0)}% confidence`
+                        : ""}
+                    </Text>
+                  )}
+                </View>
+              )}
               <Text
                 style={[
                   styles.annotationText,
@@ -481,6 +958,15 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
               >
                 {item.content}
               </Text>
+              {!isUser && !isThinking && planMeta?.steps?.length ? (
+                <View style={styles.planSummary}>
+                  {planMeta.steps.slice(0, 3).map((step, index) => (
+                    <Text key={`${messageId}-plan-${index}`} style={styles.planStep}>
+                      {index + 1}. {step}
+                    </Text>
+                  ))}
+                </View>
+              ) : null}
               {item.created_at && (
                 <Text
                   style={[
@@ -513,12 +999,51 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
                   </TouchableOpacity>
                 </View>
               )}
+              {!isUser && !isThinking && messageId && (
+                <FeedbackControls
+                  label={feedbackDraft?.label ?? null}
+                  correction={feedbackDraft?.correction ?? ""}
+                  tags={feedbackDraft?.tags ?? []}
+                  status={feedbackDraft?.status ?? "idle"}
+                  availableTags={[...feedbackCopy.tagOptions]}
+                  copy={{
+                    headline: feedbackCopy.headline,
+                    helpful: feedbackCopy.helpful,
+                    neutral: feedbackCopy.neutral,
+                    unhelpful: feedbackCopy.unhelpful,
+                    correctionPlaceholder: feedbackCopy.correctionPlaceholder,
+                    tagsLabel: feedbackCopy.tagsLabel,
+                    submit: feedbackCopy.submit,
+                    submitted: feedbackCopy.submitted,
+                    queued: feedbackCopy.queued,
+                    retrying: feedbackCopy.retrying,
+                  }}
+                  errorMessage={feedbackDraft?.error ?? null}
+                  onSelect={(selected) => handleFeedbackSelect(messageId, selected)}
+                  onCorrectionChange={(value) =>
+                    handleFeedbackCorrectionChange(messageId, value)
+                  }
+                  onToggleTag={(tag) => handleFeedbackToggleTag(messageId, tag)}
+                  onSubmit={() => handleFeedbackSubmit(messageId, aiEventId)}
+                />
+              )}
             </View>
           </View>
         </View>
       );
     },
-    [colors.accent, handleSaveAtomicMoment, selectedNotes, isNoteSelectionMode]
+    [
+      colors.accent,
+      feedbackCopy,
+      feedbackState,
+      handleFeedbackCorrectionChange,
+      handleFeedbackSelect,
+      handleFeedbackSubmit,
+      handleFeedbackToggleTag,
+      handleSaveAtomicMoment,
+      isNoteSelectionMode,
+      selectedNotes,
+    ]
   );
 
   const disableNoteSend = isSavingNote || !composerText.trim();
@@ -800,6 +1325,21 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
     (annotation) => annotation.channel === "ai"
   );
 
+  const contextModel = useMemo(
+    () => buildContextPanelModel(contextSnapshot, composerText, 0.4),
+    [contextSnapshot, composerText]
+  );
+
+  const buildAnnotationKey = useCallback(
+    (annotation: Annotation, index: number, channel: "note" | "ai") => {
+      const baseId =
+        annotation.id ??
+        `${annotation.entryId ?? "entry"}-${annotation.created_at ?? "pending"}`;
+      return `${channel}-${baseId}-${index}`;
+    },
+    []
+  );
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -1005,12 +1545,9 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
                 </Text>
               </View>
             )}
-            {noteAnnotations.map((annotation) => (
+            {noteAnnotations.map((annotation, index) => (
               <View
-                key={
-                  annotation.id ||
-                  `${annotation.entryId}-${annotation.created_at ?? ""}`
-                }
+                key={buildAnnotationKey(annotation, index, "note")}
               >
                 {renderAnnotationItem({ item: annotation })}
               </View>
@@ -1026,12 +1563,17 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
                 No AI conversation yet. Ask a question below.
               </Text>
             )}
-            {aiAnnotations.map((annotation) => (
+            {lessonRibbonVisible && lessonItems.length > 0 && (
+              <LessonRibbon
+                lessons={lessonItems}
+                visible={lessonRibbonVisible}
+                copy={lessonsCopy}
+                onDismiss={() => setLessonRibbonVisible(false)}
+              />
+            )}
+            {aiAnnotations.map((annotation, index) => (
               <View
-                key={
-                  annotation.id ||
-                  `${annotation.entryId}-${annotation.created_at ?? ""}`
-                }
+                key={buildAnnotationKey(annotation, index, "ai")}
               >
                 {renderAnnotationItem({ item: annotation })}
               </View>
@@ -1039,6 +1581,33 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
           </View>
         )}
       </ScrollView>
+
+      {composerMode === "ai" && (
+        <ContextCompassPanel
+          model={contextModel}
+          loading={isContextLoading}
+          open={isContextOpen}
+          copy={contextCopy}
+          onToggle={() =>
+            setIsContextOpen((prev) => {
+              const next = !prev;
+              if (next) {
+                const seed = composerText.trim() || entry?.content || "";
+                if (seed) {
+                  requestContext(seed);
+                }
+              }
+              return next;
+            })
+          }
+        />
+      )}
+
+      {statusMessage && (
+        <View style={styles.statusBanner}>
+          <Text style={styles.statusBannerText}>{statusMessage}</Text>
+        </View>
+      )}
 
       {isNoteSelectionMode ? (
         <View style={styles.noteSelectionFooter}>
@@ -1157,6 +1726,15 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
               }
               placeholderTextColor="rgba(244,244,244,0.6)"
               multiline
+              onFocus={() => {
+                if (composerMode === "ai") {
+                  setIsContextOpen(true);
+                  const seed = composerText.trim() || entry?.content || "";
+                  if (seed) {
+                    requestContext(seed);
+                  }
+                }
+              }}
             />
             <View
               style={[
@@ -1191,6 +1769,12 @@ const MenuEntryChat: React.FC<MenuEntryChatProps> = ({
           </View>
         </View>
       )}
+      <MetadataToastLayer
+        toasts={metadataToasts}
+        copy={metadataCopy}
+        onDismiss={dismissLatencyToast}
+        onCopied={showStatusMessage}
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -1507,6 +2091,18 @@ const createStyles = (colors: any, insets: any) =>
     annotationLabelOther: {
       color: colors.textSecondary,
     },
+    personaSummary: {
+      marginBottom: spacing.xs,
+      gap: spacing.xs / 2,
+    },
+    personaSummaryText: {
+      ...typography.small,
+      color: colors.textSecondary,
+    },
+    personaGateText: {
+      ...typography.small,
+      color: colors.textTertiary,
+    },
     annotationText: {
       fontFamily: typography.body.fontFamily,
       fontWeight: typography.body.fontWeight,
@@ -1533,6 +2129,14 @@ const createStyles = (colors: any, insets: any) =>
     annotationTimestampOther: {
       color: colors.textSecondary,
     },
+    planSummary: {
+      marginTop: spacing.sm,
+      gap: spacing.xs,
+    },
+    planStep: {
+      ...typography.small,
+      color: colors.textSecondary,
+    },
     annotationActions: {
       marginTop: spacing.sm,
       flexDirection: "row",
@@ -1549,6 +2153,20 @@ const createStyles = (colors: any, insets: any) =>
       color: colors.accent,
       fontWeight: "600",
       textTransform: "uppercase",
+    },
+    statusBanner: {
+      marginBottom: spacing.sm,
+      paddingVertical: spacing.xs,
+      paddingHorizontal: spacing.md,
+      borderRadius: radii.lg,
+      alignSelf: "flex-start",
+      backgroundColor: colors.surfaceElevated,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    statusBannerText: {
+      ...typography.small,
+      color: colors.textSecondary,
     },
     noteInputRow: {
       borderTopWidth: 1,

@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS public.model_registry (
 CREATE TABLE IF NOT EXISTS public.model_evaluations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     model_id UUID NOT NULL REFERENCES public.model_registry(id) ON DELETE CASCADE,
-    accuracy NUMERIC(5,4) NOT NULL,
-    top3_accuracy NUMERIC(5,4) NOT NULL,
+    accuracy NUMERIC(5,4) NOT NULL CHECK (accuracy BETWEEN 0 AND 1),
+    top3_accuracy NUMERIC(5,4) NOT NULL CHECK (top3_accuracy BETWEEN 0 AND 1),
     confusion JSONB NOT NULL,
     report_path TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

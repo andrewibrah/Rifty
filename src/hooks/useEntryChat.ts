@@ -9,6 +9,31 @@ import {
 } from "../services/atomicMoments";
 import { isUUID } from "../utils/uuid";
 
+type EntryDataBundle = {
+  entry: RemoteJournalEntry | null;
+  annotations: Annotation[];
+  summary: string | null;
+  emotion: string | null;
+  moments: AtomicMomentRecord[];
+};
+
+async function loadEntryData(entryId: string): Promise<EntryDataBundle> {
+  const [entry, messages, summary, moments] = await Promise.all([
+    getJournalEntryById(entryId),
+    listMessages(entryId, { limit: 200 }),
+    getEntrySummary(entryId),
+    listAtomicMomentsForEntry(entryId, { limit: 20 }),
+  ]);
+
+  return {
+    entry,
+    annotations: messages.map(mapMessageToAnnotation).filter(isNotNull),
+    summary: summary?.summary ?? null,
+    emotion: summary?.emotion ?? null,
+    moments,
+  };
+}
+
 export const useEntryChat = (
   selectedEntryId: string | null,
   visible: boolean
@@ -52,21 +77,14 @@ export const useEntryChat = (
       setAnnotationsLoading(true);
       setAnnotationsError(null);
       try {
-        const [entry, messages, summary, moments] = await Promise.all([
-          getJournalEntryById(selectedEntryId),
-          listMessages(selectedEntryId, { limit: 200 }),
-          getEntrySummary(selectedEntryId),
-          listAtomicMomentsForEntry(selectedEntryId, { limit: 20 }),
-        ]);
+        const data = await loadEntryData(selectedEntryId);
 
         if (!isCancelled) {
-          setSelectedEntry(entry);
-          setAnnotations(
-            messages.map(mapMessageToAnnotation).filter(isNotNull)
-          );
-          setEntrySummary(summary?.summary ?? null);
-          setEntryEmotion(summary?.emotion ?? null);
-          setEntryMoments(moments);
+          setSelectedEntry(data.entry);
+          setAnnotations(data.annotations);
+          setEntrySummary(data.summary);
+          setEntryEmotion(data.emotion);
+          setEntryMoments(data.moments);
         }
       } catch (error) {
         console.error("Error loading entry detail", error);
@@ -116,17 +134,12 @@ export const useEntryChat = (
     setAnnotationsLoading(true);
     setAnnotationsError(null);
     try {
-      const [entry, messages, summary, moments] = await Promise.all([
-        getJournalEntryById(selectedEntryId),
-        listMessages(selectedEntryId, { limit: 200 }),
-        getEntrySummary(selectedEntryId),
-        listAtomicMomentsForEntry(selectedEntryId, { limit: 20 }),
-      ]);
-      setSelectedEntry(entry);
-      setAnnotations(messages.map(mapMessageToAnnotation).filter(isNotNull));
-      setEntrySummary(summary?.summary ?? null);
-      setEntryEmotion(summary?.emotion ?? null);
-      setEntryMoments(moments);
+      const data = await loadEntryData(selectedEntryId);
+      setSelectedEntry(data.entry);
+      setAnnotations(data.annotations);
+      setEntrySummary(data.summary);
+      setEntryEmotion(data.emotion);
+      setEntryMoments(data.moments);
     } catch (error) {
       console.error("Error refreshing annotations", error);
       setAnnotationsError("Unable to refresh annotations.");
@@ -166,8 +179,8 @@ function mapMessageToAnnotation(message: any): Annotation | null {
     message.role === "assistant"
       ? "bot"
       : message.role === "system"
-        ? "system"
-        : "user";
+      ? "system"
+      : "user";
 
   return {
     id: message.id,

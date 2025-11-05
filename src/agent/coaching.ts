@@ -46,8 +46,8 @@ export function assessUserState(
     needsCoaching = true;
   }
 
-  const stuckGoals = operatingPicture.top_goals.filter(g => GOAL_STUCK_INDICATORS.some(word => lowerText.includes(word)));
-  if (stuckGoals.length > 0) {
+  const hasStuckLanguage = GOAL_STUCK_INDICATORS.some(word => lowerText.includes(word));
+  if (hasStuckLanguage && operatingPicture.top_goals.length > 0) {
     reasons.push('goals feeling stuck');
     needsCoaching = true;
   }

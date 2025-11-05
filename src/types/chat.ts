@@ -23,7 +23,11 @@ export interface BotMessage extends Message {
   afterId: string;
 }
 
-export type ChatMessage = EntryMessage | BotMessage;
+export interface QueryMessage extends Message {
+  kind: "query";
+}
+
+export type ChatMessage = EntryMessage | BotMessage | QueryMessage;
 
 export interface MessageGroup {
   id: string;

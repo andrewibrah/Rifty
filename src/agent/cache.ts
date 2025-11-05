@@ -1,11 +1,11 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 interface CacheEntry<T> {
   value: T;
   expiresAt: number;
 }
 
-const STORAGE_PREFIX = 'riflett_cache:';
+const STORAGE_PREFIX = "riflett_cache:";
 
 const hashString = (input: string): string => {
   let hash = 0;
@@ -25,14 +25,23 @@ export const EdgeCache = {
       const stored = await AsyncStorage.getItem(key);
       if (!stored) return null;
       const parsed = JSON.parse(stored) as CacheEntry<T>;
-      if (!parsed || typeof parsed !== 'object') return null;
-      if (parsed.expiresAt < Date.now()) {
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        Array.isArray(parsed) ||
+        typeof (parsed as CacheEntry<T>).expiresAt !== "number" ||
+        !("value" in parsed)
+      ) {
+        return null;
+      }
+
+      if ((parsed as CacheEntry<T>).expiresAt < Date.now()) {
         await AsyncStorage.removeItem(key);
         return null;
       }
-      return parsed.value;
+      return (parsed as CacheEntry<T>).value ?? null;
     } catch (error) {
-      console.warn('[cache] get failed', error);
+      console.warn("[cache] get failed", error);
       return null;
     }
   },
@@ -46,7 +55,7 @@ export const EdgeCache = {
     try {
       await AsyncStorage.setItem(key, JSON.stringify(entry));
     } catch (error) {
-      console.warn('[cache] set failed', error);
+      console.warn("[cache] set failed", error);
     }
   },
 };

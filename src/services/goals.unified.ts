@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { debugIfTableMissing } from '../utils/supabaseErrors'
 import { generateEmbedding } from './embeddings'
 import {
   CreateGoalInputSchema,
@@ -129,6 +130,9 @@ export async function listActiveGoalsWithContext(
     .limit(safeLimit * 3)
 
   if (priorityError) {
+    if (debugIfTableMissing('[goals.unified] priority fetch', priorityError)) {
+      return []
+    }
     console.error('[goals.unified] priority fetch failed', priorityError)
     throw priorityError
   }

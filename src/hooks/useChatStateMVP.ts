@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { Alert } from "react-native";
 import type {
   ChatMessage,
   MessageGroup,
@@ -8,6 +9,7 @@ import type {
 import {
   appendMessage,
   listJournals,
+  fetchLatestAssistantMessages,
   type EntryType,
 } from "../services/data";
 import { createEntryMVP, type ProcessedEntryResult } from "../lib/entries";
@@ -41,10 +43,60 @@ export const useChatStateMVP = (onEntryCreated?: () => void) => {
     goalData: any;
   } | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistWithRetry = useCallback(
+    async (
+      operation: () => Promise<void>,
+      failureMessage: string,
+      options?: { onFailure?: () => void }
+    ) => {
+      const maxAttempts = 3;
+      const baseDelayMs = 500;
+      let lastError: unknown = null;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          await operation();
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt < maxAttempts) {
+            const delay = baseDelayMs * 2 ** (attempt - 1);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          }
+        }
+      }
+
+      console.error(failureMessage, lastError);
+      options?.onFailure?.();
+      Alert.alert("Sync issue", `${failureMessage}\nPlease check your connection.`);
+    },
+    []
+  );
 
   const loadMessages = useCallback(async () => {
     try {
       const entries = await listJournals({ limit: 200 });
+      const entryIds = entries
+        .map((entry) => entry.id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0);
+      let assistantMap: Record<string, { content: string; created_at: string } | null> =
+        {};
+
+      if (entryIds.length > 0) {
+        try {
+          const latestReplies = await fetchLatestAssistantMessages(entryIds);
+          assistantMap = Object.fromEntries(
+            Object.entries(latestReplies).map(([key, value]) => [
+              key,
+              value
+                ? { content: value.content, created_at: value.created_at }
+                : null,
+            ])
+          );
+        } catch (assistantError) {
+          console.warn("Error loading assistant reflections", assistantError);
+        }
+      }
       const chatMessages: ChatMessage[] = [];
 
       entries
@@ -77,12 +129,13 @@ export const useChatStateMVP = (onEntryCreated?: () => void) => {
 
           // Add bot response if exists
           // (We'll reconstruct from metadata later)
+          const assistant = assistantMap[entry.id] ?? null;
           const botMessage: BotMessage = {
             id: `bot-${entry.id}`,
             kind: "bot",
             afterId: entry.id,
-            content: "Saved.",
-            created_at: createdAt,
+            content: assistant?.content ?? "Saved. Keep going.",
+            created_at: assistant?.created_at ?? createdAt,
             status: "sent",
           };
           chatMessages.push(botMessage);
@@ -128,7 +181,7 @@ export const useChatStateMVP = (onEntryCreated?: () => void) => {
           id: message.id,
           messages: [message],
           timestamp: message.created_at,
-          type: message.kind === "entry" ? "entry" : "bot",
+          type: message.kind === "entry" || message.kind === "query" ? "entry" : "bot",
         };
         groups.push(currentGroup);
       }
@@ -149,10 +202,9 @@ export const useChatStateMVP = (onEntryCreated?: () => void) => {
 
       if (isQuery) {
         // Analyst mode: answer the question
-        const userMessage: BotMessage = {
+        const userMessage: ChatMessage = {
           id: tempId,
-          kind: "bot",
-          afterId: tempId,
+          kind: "query",
           content: trimmedContent,
           created_at: new Date().toISOString(),
           status: "sending",
@@ -244,15 +296,17 @@ export const useChatStateMVP = (onEntryCreated?: () => void) => {
               )
             );
 
-            appendMessage(entryId, "user", trimmedContent, {
-              messageKind: "entry",
-              entryType: resolvedType,
-              aiIntent,
-              aiConfidence,
-              aiMeta,
-            }).catch((error) => {
-              console.error("Unable to record entry message", error);
-            });
+            void persistWithRetry(
+              () =>
+                appendMessage(entryId, "user", trimmedContent, {
+                  messageKind: "entry",
+                  entryType: resolvedType,
+                  aiIntent,
+                  aiConfidence,
+                  aiMeta,
+                }).then(() => undefined),
+              "We couldn't archive this entry in history."
+            );
 
             setIsTyping(true);
 
@@ -288,16 +342,29 @@ export const useChatStateMVP = (onEntryCreated?: () => void) => {
 
               setMessages((prevMessages) => [...prevMessages, botMessage]);
 
-              appendMessage(entryId, "assistant", reflection, {
-                messageKind: "autoReply",
-                entryType: resolvedType,
-                afterId: entryId,
-                aiIntent,
-                aiConfidence,
-                aiMeta,
-              }).catch((error) => {
-                console.error("Unable to record auto-reply", error);
-              });
+              void persistWithRetry(
+                () =>
+                  appendMessage(entryId, "assistant", reflection, {
+                    messageKind: "autoReply",
+                    entryType: resolvedType,
+                    afterId: entryId,
+                    aiIntent,
+                    aiConfidence,
+                    aiMeta,
+                  }).then(() => undefined),
+                "We couldn't save the coach reply to history.",
+                {
+                  onFailure: () => {
+                    setMessages((prev) =>
+                      prev.map((msg) =>
+                        msg.id === botMessage.id
+                          ? { ...msg, status: "failed" as const }
+                          : msg
+                      )
+                    );
+                  },
+                }
+              );
             }, 1500);
           }
         } catch (error) {

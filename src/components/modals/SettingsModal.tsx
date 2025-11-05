@@ -1,5 +1,12 @@
-import React, { useMemo } from "react";
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import {
+  Alert,
+  Modal,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
@@ -23,6 +30,27 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   const { themeMode, toggleTheme, isDark, isSystemTheme } = useTheme();
   const colors = getColors(themeMode);
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      Alert.alert("Signed out", "See you again soon.");
+      onClose();
+    } catch (error) {
+      console.error("[SettingsModal] Sign out failed", error);
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Something went wrong while signing out. Please try again.";
+      Alert.alert("Sign out failed", message);
+    } finally {
+      setSigningOut(false);
+    }
+  };
 
   return (
     <Modal
@@ -123,8 +151,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                         isSystemTheme
                           ? "phone-portrait-outline"
                           : isDark
-                            ? "moon-outline"
-                            : "sunny-outline"
+                          ? "moon-outline"
+                          : "sunny-outline"
                       }
                       size={20}
                       color={colors.accent}
@@ -136,8 +164,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                       {isSystemTheme
                         ? "System Theme"
                         : isDark
-                          ? "Dark Mode"
-                          : "Light Mode"}
+                        ? "Dark Mode"
+                        : "Light Mode"}
                     </Text>
                   </View>
                   <Ionicons
@@ -152,8 +180,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Actions</Text>
                 <TouchableOpacity
-                  style={styles.logoutButton}
-                  onPress={() => supabase.auth.signOut()}
+                  style={[
+                    styles.logoutButton,
+                    signingOut && styles.logoutButtonDisabled,
+                  ]}
+                  onPress={handleSignOut}
+                  disabled={signingOut}
+                  accessibilityState={{
+                    busy: signingOut,
+                    disabled: signingOut,
+                  }}
                 >
                   <View style={styles.logoutIconContainer}>
                     <Ionicons
@@ -162,7 +198,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                       color={colors.error}
                     />
                   </View>
-                  <Text style={styles.logoutButtonText}>Sign Out</Text>
+                  <Text
+                    style={[
+                      styles.logoutButtonText,
+                      signingOut && styles.logoutButtonTextDisabled,
+                    ]}
+                  >
+                    {signingOut ? "Signing Out..." : "Sign Out"}
+                  </Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -354,6 +397,9 @@ const createStyles = (colors: any) =>
       borderLeftWidth: 2,
       borderLeftColor: colors.error,
     },
+    logoutButtonDisabled: {
+      opacity: 0.6,
+    },
     logoutIconContainer: {
       width: 40,
       height: 40,
@@ -368,6 +414,9 @@ const createStyles = (colors: any) =>
       fontWeight: "600" as const,
       fontSize: 15,
       color: colors.textPrimary,
+    },
+    logoutButtonTextDisabled: {
+      color: colors.textSecondary,
     },
   });
 

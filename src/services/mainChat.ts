@@ -523,8 +523,16 @@ export async function generateMainChatReply(args: GenerateArgs): Promise<MainCha
         ...structured,
         reply: streamedReply,
       }
-    } catch (error) {
-      console.warn('[mainChat] streaming failed, falling back to non-streaming', error)
+    } catch (error: unknown) {
+      const message =
+        typeof error === 'object' && error && 'message' in error
+          ? String((error as { message?: unknown }).message)
+          : '';
+      if (message === 'Streaming response unavailable') {
+        console.debug('[mainChat] streaming unavailable, using fallback');
+      } else {
+        console.warn('[mainChat] streaming failed, falling back to non-streaming', error);
+      }
       const structured = await requestStructuredResponse(requestArgs)
       args.onToken(structured.reply)
       return structured

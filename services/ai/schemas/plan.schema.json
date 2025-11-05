@@ -1,0 +1,38 @@
+{
+  "name": "plan_schema",
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["intent", "goal", "steps", "timeline", "resources_needed"],
+    "properties": {
+      "intent": {
+        "type": "string",
+        "enum": ["plan"]
+      },
+      "goal": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "steps": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "minItems": 1,
+        "maxItems": 10
+      },
+      "timeline": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "resources_needed": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 50
+        }
+      }
+    }
+  }
+}

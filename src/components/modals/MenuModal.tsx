@@ -66,7 +66,8 @@ const MenuModal: React.FC<MenuModalProps> = ({
   const goalsPanelRef = useRef<{ addGoal: () => void }>(null);
 
   // Use passed menu state or create new one
-  const menuState = passedMenuState || useMenuState();
+  const internalMenuState = useMenuState();
+  const menuState = passedMenuState ?? internalMenuState;
   const entryChat = useEntryChat(menuState.selectedEntryId, visible);
 
   // Handle modal animation

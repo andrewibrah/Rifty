@@ -9,14 +9,45 @@ console.log("Hello from Functions!");
 
 Deno.serve({
   onRequest: async (req) => {
-    const { name } = await req.json();
-    const data = {
-      message: `Hello ${name}!`,
-    };
+    if (req.method !== "POST") {
+      return new Response(JSON.stringify({ error: "Method not allowed" }), {
+        status: 405,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
-    return new Response(JSON.stringify(data), {
-      headers: { "Content-Type": "application/json" },
-    });
+    try {
+      const body = await req.json();
+      const name = body?.name;
+
+      if (!name || typeof name !== "string") {
+        return new Response(
+          JSON.stringify({ error: 'Missing or invalid "name" field' }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      const data = {
+        message: `Hello ${name}!`,
+      };
+
+      return new Response(JSON.stringify(data), {
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        return new Response(JSON.stringify({ error: "Invalid JSON payload" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      console.error("[hello-world] Unexpected error:", error);
+      return new Response(JSON.stringify({ error: "Internal server error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
   },
 });
 

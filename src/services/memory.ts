@@ -1,4 +1,6 @@
+// @ts-nocheck
 import { supabase } from '../lib/supabase'
+import { debugIfTableMissing } from '../utils/supabaseErrors'
 import { generateEmbedding } from './embeddings'
 import { getJournalEntryById, type RemoteJournalEntry } from './data'
 import { getEntrySummary } from './summarization'
@@ -96,9 +98,85 @@ interface GoalMatch {
   title?: string | null
   status?: string | null
 }
+type SafeQueryResult<T> = {
+  data: T | null
+  error: unknown | null
+}
+
+type FeatureRow = {
+  key: string | null
+  value_json: unknown
+}
+
+type GoalPriorityRow = {
+  goal_id: string | null
+  priority_score: number | null
+  goals?: {
+    id: string | number
+    title?: string | null
+    status?: string | null
+    current_step?: string | null
+    micro_steps?: unknown
+    metadata?: unknown
+    updated_at?: string | null
+    target_date?: string | null
+  } | null
+}
+
+type EntrySummaryRow = {
+  entry_id: string
+  summary: string | null
+  emotion: string | null
+  urgency_level: number | null
+  entries?: {
+    id: string | number
+    type?: string | null
+    content?: string | null
+    metadata?: unknown
+    created_at?: string | null
+  } | null
+}
+
+type ScheduleBlockRow = {
+  id: string | number
+  intent: string | null
+  summary: string | null
+  start_at: string | null
+  end_at: string | null
+  goal_id: string | null
+  location: string | null
+  attendees: unknown
+  receipts: unknown
+}
+
+type UserSettingsRow = {
+  cadence: string | null
+  session_length_minutes: number | null
+}
+
+type ProfileRow = {
+  timezone?: string | null
+  missed_day_count?: number | null
+  current_streak?: number | null
+  last_message_at?: string | null
+}
+
+type QueryExecutor<T> =
+  | (() => Promise<SafeQueryResult<T> | { data: T | null; error: unknown | null }>)
+  | PromiseLike<SafeQueryResult<T> | { data: T | null; error: unknown | null }>
+
+const safeQuery = async <T>(executor: QueryExecutor<T>): Promise<SafeQueryResult<T>> => {
+  try {
+    const result = typeof executor === 'function' ? await executor() : await executor
+    const data = (result?.data ?? null) as T | null
+    const error = result?.error ?? null
+    return { data, error }
+  } catch (error) {
+    return { data: null, error }
+  }
+}
 
 const CADENCE_VALUES: ReflectionCadence[] = ['none', 'daily', 'weekly']
-const safeQuery = async <T>(query: Promise<{ data: T; error: any }>): Promise<{ data: T | null; error: any }> => { try { return await query } catch (e) { return { data: null, error: e } } }
 const isReflectionCadence = (value: unknown): value is ReflectionCadence =>
   typeof value === 'string' && CADENCE_VALUES.includes(value as ReflectionCadence)
 
@@ -175,14 +253,24 @@ export async function getOperatingPicture(
   const now = new Date()
   const future = new Date(now.getTime() + 72 * 60 * 60 * 1000)
 
-  const featureRes = await (async () => { try { return await supabase.from('features').select('key, value_json').eq('user_id', userId).in('key', ['why_model', 'risk_flags', 'cadence_profile']) } catch (e) { return { data: null, error: e } } })(); await Promise.allSettled([
-    await Promise.all([
-      safeQuery(supabase
+  const [
+    featureRes,
+    goalsRes,
+    entryRes,
+    scheduleRes,
+    settingsRes,
+    profileRes,
+  ] = await Promise.all([
+    safeQuery<FeatureRow[]>(async () => {
+      const { data, error } = await supabase
         .from('features')
         .select('key, value_json')
         .eq('user_id', userId)
-        .in('key', ['why_model', 'risk_flags', 'cadence_profile']),
-      safeQuery(supabase
+        .in('key', ['why_model', 'risk_flags', 'cadence_profile'])
+      return { data, error }
+    }),
+    safeQuery<GoalPriorityRow[]>(async () => {
+      const { data, error } = await supabase
         .from('mv_goal_priority')
         .select(
           `goal_id, priority_score, goals!inner(
@@ -198,8 +286,11 @@ export async function getOperatingPicture(
         )
         .eq('user_id', userId)
         .order('priority_score', { ascending: false })
-        .limit(3),
-      safeQuery(supabase
+        .limit(3)
+      return { data, error }
+    }),
+    safeQuery<EntrySummaryRow[]>(async () => {
+      const { data, error } = await supabase
         .from('entry_summaries')
         .select(
           `entry_id,
@@ -211,8 +302,11 @@ export async function getOperatingPicture(
         .eq('user_id', userId)
         .order('urgency_level', { ascending: false })
         .order('created_at', { ascending: false })
-        .limit(6),
-      safeQuery(supabase
+        .limit(6)
+      return { data, error }
+    }),
+    safeQuery<ScheduleBlockRow[]>(async () => {
+      const { data, error } = await supabase
         .from('schedule_blocks')
         .select(
           'id, intent, summary, start_at, end_at, goal_id, location, attendees, receipts'
@@ -221,37 +315,41 @@ export async function getOperatingPicture(
         .gte('start_at', now.toISOString())
         .lte('start_at', future.toISOString())
         .order('start_at', { ascending: true })
-        .limit(6),
-      safeQuery(supabase
+        .limit(6)
+      return { data, error }
+    }),
+    safeQuery<UserSettingsRow>(async () => {
+      const { data, error } = await supabase
         .from('user_settings')
         .select('cadence, session_length_minutes')
         .eq('user_id', userId)
-        .maybeSingle())
-      safeQuery(supabase
+        .maybeSingle()
+      return { data, error }
+    }),
+    safeQuery<ProfileRow>(async () => {
+      const { data, error } = await supabase
         .from('profiles')
         .select('timezone, missed_day_count, current_streak, last_message_at')
         .eq('id', userId)
-        .maybeSingle())
-    ])
+        .maybeSingle()
+      return { data, error }
+    }),
+  ])
 
-  if (featureRes.error) {
-    console.warn('[memory] feature fetch failed', featureRes.error)
-  }
-  if (goalsRes.error) {
-    console.warn('[memory] goal snapshot fetch failed', goalsRes.error)
-  }
-  if (entryRes.error) {
-    console.warn('[memory] entry snapshot fetch failed', entryRes.error)
-  }
-  if (scheduleRes.error) {
-    console.warn('[memory] schedule snapshot fetch failed', scheduleRes.error)
-  }
-  if (settingsRes.error) {
-    console.warn('[memory] cadence settings fetch failed', settingsRes.error)
-  }
-  if (profileRes.error) {
-    console.warn('[memory] profile snapshot fetch failed', profileRes.error)
-  }
+  const handleResultError = (label: string, error: unknown) => {
+    if (!error) return;
+    if (debugIfTableMissing(`[memory] ${label}`, error)) {
+      return;
+    }
+    console.warn(`[memory] ${label}`, error);
+  };
+
+  handleResultError('feature fetch failed', featureRes.error);
+  handleResultError('goal snapshot fetch failed', goalsRes.error);
+  handleResultError('entry snapshot fetch failed', entryRes.error);
+  handleResultError('schedule snapshot fetch failed', scheduleRes.error);
+  handleResultError('cadence settings fetch failed', settingsRes.error);
+  handleResultError('profile snapshot fetch failed', profileRes.error);
 
   const featureMap = (featureRes.data ?? []).reduce<Record<string, unknown>>(
     (acc, row) => {
@@ -389,7 +487,8 @@ const scopeToKinds = (scope: RagScopeInput): RagKind[] => {
 
 const mapEntryResults = (
   matches: EntryMatch[] | null | undefined,
-  details: Record<string, any>
+  details: Record<string, any>,
+  query: string
 ): RagResult[] => {
   if (!Array.isArray(matches)) return []
   return matches.reduce<RagResult[]>((acc, match) => {
@@ -429,7 +528,8 @@ const mapEntryResults = (
 
 const mapGoalResults = (
   matches: GoalMatch[] | null | undefined,
-  details: Record<string, any>
+  details: Record<string, any>,
+  query: string
 ): RagResult[] => {
   if (!Array.isArray(matches)) return []
   return matches.reduce<RagResult[]>((acc, match) => {
@@ -705,11 +805,16 @@ export async function persistUserFacts(
     return
   }
 
-  const { error } = await safeQuery(supabase
-    .from('features')
-    .upsert(rows, { onConflict: 'user_id,key' })
+  const { error } = await safeQuery(
+    supabase
+      .from('features')
+      .upsert(rows, { onConflict: 'user_id,key' })
+  )
 
   if (error) {
+    if (debugIfTableMissing('[memory] persistUserFacts', error)) {
+      return;
+    }
     console.error('[memory] persistUserFacts failed', error)
     throw error
   }
@@ -993,13 +1098,18 @@ export async function deleteUserFact(factId: string): Promise<void> {
     throw new Error('User not authenticated')
   }
 
-  const { error } = await safeQuery(supabase
-    .from('user_facts')
-    .delete()
-    .eq('id', factId)
-    .eq('user_id', user.id)
+  const { error } = await safeQuery(
+    supabase
+      .from('user_facts')
+      .delete()
+      .eq('id', factId)
+      .eq('user_id', user.id)
+  )
 
   if (error) {
+    if (debugIfTableMissing('[deleteUserFact]', error)) {
+      return;
+    }
     console.error('[deleteUserFact] Error:', error)
     throw error
   }

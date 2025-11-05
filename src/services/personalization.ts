@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
+import { debugIfTableMissing } from "../utils/supabaseErrors";
 import {
   type CachedPersonalization,
   type PersonalizationBundle,
@@ -144,6 +145,9 @@ const fetchFeatureMap = async (
       .eq("user_id", userId);
 
     if (error) {
+      if (debugIfTableMissing("[personalization] feature fetch", error)) {
+        return {};
+      }
       console.warn("[personalization] feature fetch failed", error);
       return {};
     }

@@ -17,7 +17,6 @@ interface ChatHeaderProps {
   onClearPress: () => void;
   onCalendarPress: () => void;
   onScheduleTemplatePress: () => void;
-  hasContent: boolean;
 }
 
 const ChatHeader: React.FC<ChatHeaderProps> = ({
@@ -25,7 +24,6 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   onClearPress,
   onCalendarPress,
   onScheduleTemplatePress,
-  hasContent,
 }) => {
   const { themeMode } = useTheme();
   const colors = getColors(themeMode);
@@ -52,17 +50,19 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
         <Text style={styles.title}>riflett</Text>
       </View>
       <View style={styles.rightActions}>
-        <TouchableOpacity
-          onPress={onCalendarPress}
-          style={styles.scheduleButton}
-          accessibilityRole="button"
-          accessibilityLabel="Open schedule calendar"
-        >
-          <Ionicons
-            name="calendar-outline"
-            size={20}
-            color={colors.textSecondary}
-          />
+        <View style={styles.scheduleButtonContainer}>
+          <TouchableOpacity
+            onPress={onCalendarPress}
+            style={styles.scheduleButton}
+            accessibilityRole="button"
+            accessibilityLabel="Open schedule calendar"
+          >
+            <Ionicons
+              name="calendar-outline"
+              size={20}
+              color={colors.textSecondary}
+            />
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={onScheduleTemplatePress}
             style={styles.addButton}
@@ -71,7 +71,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
           >
             <Ionicons name="add-outline" size={12} color={colors.accent} />
           </TouchableOpacity>
-        </TouchableOpacity>
+        </View>
         <TouchableOpacity
           onPress={onClearPress}
           style={[styles.iconButton, styles.iconButtonSpacing]}
@@ -113,17 +113,6 @@ const createStyles = (colors: any, topPadding: number) =>
       fontWeight: "bold" as const,
       textAlign: "center",
     },
-    buttonPlaceholder: {
-      minWidth: 36,
-      minHeight: 36,
-    },
-    clearButton: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      minWidth: 36,
-      minHeight: 36,
-    },
     menuButton: {
       flexDirection: "row",
       alignItems: "center",
@@ -146,13 +135,17 @@ const createStyles = (colors: any, topPadding: number) =>
     iconButtonSpacing: {
       marginLeft: spacing.sm,
     },
+    scheduleButtonContainer: {
+      position: "relative",
+      minWidth: 36,
+      minHeight: 36,
+    },
     scheduleButton: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
       minWidth: 36,
       minHeight: 36,
-      position: "relative",
     },
     addButton: {
       position: "absolute",

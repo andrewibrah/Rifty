@@ -1081,7 +1081,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
               onClearPress={handleClearChat}
               onCalendarPress={handleCalendarButtonPress}
               onScheduleTemplatePress={handleScheduleTemplatePress}
-              hasContent={messages.length > 0}
             />
 
             <View style={styles.messageContainer}>

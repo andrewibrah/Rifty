@@ -9,7 +9,7 @@ import { buildRoutedIntent, route } from '@/agent/intentRouting';
 import { Telemetry } from '@/agent/telemetry';
 import type { EnrichedPayload, RouteDecision, RoutedIntent } from '@/agent/types';
 import { classifyRiflettIntent, toNativeLabel } from './riflettIntentClassifier';
-import { assessUserState, generateCoachingSuggestion } from './coaching';import { listActiveGoalsWithContext } from '@/services/goals.unified';
+import { listActiveGoalsWithContext } from '@/services/goals.unified';
 import type { GoalContextItem } from '@/types/goal';
 import type { MemoryRecord } from '@/agent/memory';
 import type { PersonalizationRuntime } from '@/types/personalization';
@@ -20,6 +20,7 @@ export interface HandleUtteranceOptions {
   topK?: number;
   userConfig?: Partial<PersonalizationRuntime>;
   kindsOverride?: string[];
+  coachingSuggestion?: { type: 'goal_check' | 'reflection' | string } | null;
 }
 
 export interface HandleUtteranceResult {
@@ -112,10 +113,20 @@ interface ScoredMemoryRecord extends MemoryRecord {
     semantic: number;
     affect: number;
     relationship: number;
+    timeOfDay: number;
+    coaching: number;
   };
 }
 
-export const scoreContextRecords = (records: MemoryRecord[]): ScoredMemoryRecord[] => {
+type ScoreContextOptions = {
+  userTimeZone?: string;
+  coachingSuggestion?: { type: 'goal_check' | 'reflection' | string } | null;
+};
+
+export const scoreContextRecords = (
+  records: MemoryRecord[],
+  options?: ScoreContextOptions
+): ScoredMemoryRecord[] => {
   if (!records.length) return [];
 
   const timestamps = records.map((record) => record.ts ?? 0);
@@ -136,33 +147,47 @@ export const scoreContextRecords = (records: MemoryRecord[]): ScoredMemoryRecord
       let timeOfDayScore = 0.5;
       if (options?.userTimeZone) {
         try {
-          const recordDate = new Date(record.ts);
+          const recordDate = record.ts ? new Date(record.ts) : null;
           const now = new Date();
-          const recordHour = recordDate.getUTCHours() + (recordDate.getTimezoneOffset() / 60);
-          const nowHour = now.getUTCHours() + (now.getTimezoneOffset() / 60);
-          const hourDiff = Math.abs(recordHour - nowHour);
-          timeOfDayScore = Math.max(0, 1 - hourDiff / 12);
+          if (recordDate) {
+            const formatter = new Intl.DateTimeFormat('en-US', {
+              hour: 'numeric',
+              hour12: false,
+              timeZone: options.userTimeZone,
+            });
+            const recordHour = Number(formatter.format(recordDate));
+            const nowHour = Number(formatter.format(now));
+            const hourDiff = Math.min(Math.abs(recordHour - nowHour), 24 - Math.abs(recordHour - nowHour));
+            timeOfDayScore = Math.max(0, 1 - hourDiff / 12);
+          }
         } catch (error) {
-          // Ignore
+          // Ignore timezone formatting issues
         }
       }
 
-      // Coaching boost
-      let coachingBoost = 0;
-      if (options?.coachingSuggestion) {
-        const suggestion = options.coachingSuggestion;
-        if (suggestion.type === 'goal_check' && record.kind === 'goal') {
-          coachingBoost = 0.2;
-        } else if (suggestion.type === 'reflection' && record.kind === 'entry') {
-          coachingBoost = 0.15;
+      let coachingScore = 0.5;
+      const suggestionType = options?.coachingSuggestion?.type ?? null;
+      if (suggestionType) {
+        if (suggestionType === 'goal_check') {
+          coachingScore = record.kind === 'goal' ? 1 : 0.35;
+        } else if (suggestionType === 'reflection') {
+          coachingScore = record.kind === 'entry' ? 1 : 0.35;
+        } else {
+          coachingScore = 0.6;
         }
       }
+
+      const normalizedTimeOfDay = clamp01(timeOfDayScore);
+      const normalizedCoaching = clamp01(coachingScore);
+
       const composite =
-        0.4 * recencyScore +
-        0.3 * priority +
+        0.3 * recencyScore +
+        0.25 * priority +
         0.15 * semantic +
         0.1 * affect +
-        0.05 * relationship;
+        0.1 * relationship +
+        0.05 * normalizedTimeOfDay +
+        0.05 * normalizedCoaching;
 
       return {
         ...record,
@@ -173,6 +198,8 @@ export const scoreContextRecords = (records: MemoryRecord[]): ScoredMemoryRecord
           semantic: Number(semantic.toFixed(3)),
           affect: Number(affect.toFixed(3)),
           relationship: Number(relationship.toFixed(3)),
+          timeOfDay: Number(normalizedTimeOfDay.toFixed(3)),
+          coaching: Number(normalizedCoaching.toFixed(3)),
         },
       } satisfies ScoredMemoryRecord;
     })
@@ -202,8 +229,9 @@ const ensureUserConfig = async (
 
 export async function handleUtterance(
   text: string,
-  options: HandleUtteranceOptions = {}
+  optionsInput?: HandleUtteranceOptions | null
 ): Promise<HandleUtteranceResult> {
+  const options: HandleUtteranceOptions = optionsInput ?? {};
   const startedAt = Date.now();
   const trimmed = text.trim();
   if (!trimmed) {
@@ -217,7 +245,15 @@ export async function handleUtterance(
     topK: options.topK ?? 5,
   });
 
-  const scoredContextRecords = scoreContextRecords(contextRecords, { userTimeZone: options.userTimeZone });
+  const contextOptions: ScoreContextOptions | undefined =
+    options.userTimeZone || options.coachingSuggestion
+      ? {
+          ...(options.userTimeZone ? { userTimeZone: options.userTimeZone } : {}),
+          ...(options.coachingSuggestion ? { coachingSuggestion: options.coachingSuggestion } : {}),
+        }
+      : undefined;
+
+  const scoredContextRecords = scoreContextRecords(contextRecords, contextOptions);
 
   const telemetryRetrieval = scoredContextRecords.map((record) => ({
     id: record.id,

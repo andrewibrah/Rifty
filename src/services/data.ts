@@ -94,6 +94,44 @@ export async function appendMessage(
   return data as RemoteMessage
 }
 
+export async function fetchLatestAssistantMessages(
+  conversationIds: string[]
+): Promise<Record<string, RemoteMessage | null>> {
+  if (conversationIds.length === 0) {
+    return {}
+  }
+
+  const user = await requireUser()
+
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('user_id', user.id)
+    .in('conversation_id', conversationIds)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw error
+  }
+
+  const assistantMap: Record<string, RemoteMessage | null> = {}
+  const rows = (data ?? []) as RemoteMessage[]
+
+  for (const message of rows) {
+    if (message.role !== 'assistant') continue
+    if (assistantMap[message.conversation_id]) continue
+    assistantMap[message.conversation_id] = message
+  }
+
+  conversationIds.forEach((id) => {
+    if (!(id in assistantMap)) {
+      assistantMap[id] = null
+    }
+  })
+
+  return assistantMap
+}
+
 export async function listJournals(
   options: { limit?: number; before?: string; type?: EntryType } = {}
 ): Promise<RemoteJournalEntry[]> {
@@ -245,8 +283,7 @@ export async function logIntentAudit(params: {
   const user = await requireUser()
 
   if (!isUUID(params.entryId)) {
-    console.warn('[logIntentAudit] Skipping audit insert for invalid entry id', params.entryId)
-    return
+    throw new Error('[logIntentAudit] Invalid entryId: must be a UUID')
   }
 
   const { error } = await supabase.from('intent_audits').insert({

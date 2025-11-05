@@ -1,5 +1,6 @@
 import Constants from 'expo-constants'
 import { supabase } from '../lib/supabase'
+import { resolveOpenAIApiKey } from './ai'
 import type {
   EntrySummary,
   CreateEntrySummaryParams,
@@ -10,19 +11,6 @@ import { isUUID } from '../utils/uuid'
 
 const MODEL_NAME = 'gpt-4o-mini' as const
 
-const getOpenAIKey = (): string => {
-  const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, any>
-  const apiKey =
-    extra?.openaiApiKey ||
-    extra?.EXPO_PUBLIC_OPENAI_API_KEY ||
-    extra?.OPENAI_API_KEY
-
-  if (!apiKey) {
-    throw new Error('OpenAI API key is missing')
-  }
-  return apiKey
-}
-
 /**
  * Summarize an entry using OpenAI with structured extraction
  */
@@ -30,7 +18,7 @@ export async function summarizeEntry(
   content: string,
   entryType: string
 ): Promise<SummarizeEntryResult> {
-  const apiKey = getOpenAIKey()
+  const apiKey = resolveOpenAIApiKey()
   const ctrl = new AbortController()
   const timeout = setTimeout(() => ctrl.abort(), 45000)
 
@@ -127,7 +115,7 @@ Entry type: ${entryType}`
  * Detect if entry implies a goal
  */
 export async function detectGoal(content: string): Promise<GoalDetectionResult> {
-  const apiKey = getOpenAIKey()
+  const apiKey = resolveOpenAIApiKey()
   const ctrl = new AbortController()
   const timeout = setTimeout(() => ctrl.abort(), 30000)
 

@@ -1,4 +1,5 @@
 import { getIntentDefinition } from "@/constants/intents";
+import type { IntentDefinition } from "@/constants/intents";
 import type { NativeIntentResult } from "@/native/intent";
 import { toSnakeCase, toPascalCase } from "@/utils/strings";
 import type { RouteDecision, RoutedIntent } from "./types";
@@ -6,10 +7,6 @@ import type { RouteDecision, RoutedIntent } from "./types";
 export const ROUTE_AT_THRESHOLD = 0.75;
 export const CLARIFY_LOWER_THRESHOLD = 0.45;
 export const SECONDARY_INTENT_THRESHOLD = 0.6;
-
-const ROUTE_AT = ROUTE_AT_THRESHOLD;
-const CLARIFY_LOWER = CLARIFY_LOWER_THRESHOLD;
-const SECONDARY_THRESHOLD = SECONDARY_INTENT_THRESHOLD;
 
 type ScoredLabel = { label: string; confidence: number };
 
@@ -56,8 +53,22 @@ export function buildRoutedIntent(
   };
 
   const second = topK.find((candidate) => candidate.label !== primary.label);
-  const primaryDefinition = getIntentDefinition(primary.label);
-  const secondDefinition = second ? getIntentDefinition(second.label) : null;
+  const fallbackDefinition = (label: string): IntentDefinition => ({
+    id: "unknown",
+    label,
+    subsystem: "entries",
+    allowedInEntryChat: true,
+  });
+
+  const primaryDefinitionRaw = getIntentDefinition(primary.label);
+  const isPrimaryFallback = !primaryDefinitionRaw;
+  const primaryDefinition = primaryDefinitionRaw ?? fallbackDefinition(primary.label);
+  const secondDefinitionRaw = second ? getIntentDefinition(second.label) : null;
+  const secondDefinition = secondDefinitionRaw
+    ? secondDefinitionRaw
+    : second
+      ? fallbackDefinition(second.label)
+      : null;
 
   const matchedTokensLookup = new Map<string, string[]>();
   if (Array.isArray(nativeIntent.matchedTokens)) {
@@ -70,13 +81,14 @@ export function buildRoutedIntent(
 
   const resolvedTopK = topK.length ? topK : [primary];
   const matchedTokens = resolvedTopK.map((candidate) => {
-    const definition = getIntentDefinition(candidate.label);
+    const definitionRaw = getIntentDefinition(candidate.label);
+    const definition = definitionRaw ?? fallbackDefinition(candidate.label);
     const tokens =
       matchedTokensLookup.get(definition.label) ??
       matchedTokensLookup.get(candidate.label) ??
       [];
     return {
-      label: toPascalCase(definition.label),
+      label: definitionRaw ? toPascalCase(definition.label) : candidate.label,
       tokens,
     };
   });
@@ -86,10 +98,14 @@ export function buildRoutedIntent(
     : null;
 
   return {
-    label: toPascalCase(primaryDefinition.label),
+    label: isPrimaryFallback ? primary.label : toPascalCase(primaryDefinition.label),
     rawLabel: primaryDefinition.label,
     confidence: clamp(primary.confidence),
-    secondBest: secondDefinition ? toPascalCase(secondDefinition.label) : null,
+    secondBest: secondDefinition
+      ? secondDefinitionRaw
+        ? toPascalCase(secondDefinition.label)
+        : second?.label ?? null
+      : null,
     secondConfidence: second ? clamp(second.confidence) : null,
     slots,
     topK: resolvedTopK,
@@ -102,9 +118,9 @@ export function buildRoutedIntent(
 }
 
 export function route(intent: RoutedIntent): RouteDecision {
-  if (intent.confidence >= ROUTE_AT) {
+  if (intent.confidence >= ROUTE_AT_THRESHOLD) {
     const maybeSecondary =
-      intent.secondBest && (intent.secondConfidence ?? 0) >= SECONDARY_THRESHOLD
+      intent.secondBest && (intent.secondConfidence ?? 0) >= SECONDARY_INTENT_THRESHOLD
         ? intent.secondBest
         : null;
     return {
@@ -114,7 +130,7 @@ export function route(intent: RoutedIntent): RouteDecision {
     };
   }
 
-  if (intent.confidence >= CLARIFY_LOWER) {
+  if (intent.confidence >= CLARIFY_LOWER_THRESHOLD) {
     const humanLabel = toSnakeCase(intent.label).replace(/_/g, " ");
     return {
       kind: "clarify",
@@ -126,5 +142,5 @@ export function route(intent: RoutedIntent): RouteDecision {
 }
 
 export function shouldConsiderSecondary(intent: RoutedIntent): boolean {
-  return (intent.secondConfidence ?? 0) >= SECONDARY_THRESHOLD;
+  return (intent.secondConfidence ?? 0) >= SECONDARY_INTENT_THRESHOLD;
 }

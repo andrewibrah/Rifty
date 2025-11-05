@@ -207,7 +207,6 @@ const executeSql = async (sql: string, params: any[] = []): Promise<SQLiteResult
 const loadSqliteModule = (): ExpoSqliteModule | null => {
   try {
     // Use CommonJS require to avoid Metro async shim.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
     const baseModule = require('expo-sqlite') as ExpoSqliteModule & {
       default?: ExpoSqliteModule;
       legacy?: ExpoSqliteModule;

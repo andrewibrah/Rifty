@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { vi } from 'vitest';
 
 type SupabaseResult<T = any> = Promise<{ data: T; error: any }>; 

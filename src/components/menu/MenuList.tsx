@@ -152,7 +152,9 @@ const MenuList: React.FC<MenuListProps> = ({
     const entryCount = selectedEntries.size;
     Alert.alert(
       "Delete Selected Entries",
-      `Are you sure you want to delete ${entryCount} ${entryCount === 1 ? "entry" : "entries"}? This cannot be undone.`,
+      `Are you sure you want to delete ${entryCount} ${
+        entryCount === 1 ? "entry" : "entries"
+      }? This cannot be undone.`,
       [
         {
           text: "Cancel",
@@ -198,8 +200,8 @@ const MenuList: React.FC<MenuListProps> = ({
         type === "goal"
           ? "Goals"
           : type === "journal"
-            ? "Journals"
-            : "Schedules";
+          ? "Journals"
+          : "Schedules";
 
       Alert.alert(
         `Clear All ${typeLabel}`,
@@ -395,11 +397,18 @@ const MenuList: React.FC<MenuListProps> = ({
         <FlatList
           style={styles.list}
           data={entries}
-          keyExtractor={(item) =>
-            item.id != null
+          keyExtractor={(item, index) => {
+            if (item.id == null) {
+              console.warn(
+                "[MenuList] Entry missing id, falling back to composite key",
+                item
+              );
+            }
+
+            return item.id != null
               ? item.id.toString()
-              : `${item.type}-${item.created_at ?? ""}`
-          }
+              : `${item.type}-${item.created_at ?? "unknown"}-${index}`;
+          }}
           renderItem={renderEntryItem}
         />
       </View>

@@ -35,7 +35,7 @@ export async function registerModelVersion(payload: {
       version: payload.version,
       description: payload.description ?? null,
       artifact_path: payload.artifactPath ?? null,
-      metadata: payload.metadata ?? {},
+      metadata: payload.metadata ?? null,
     })
     .select()
     .single();

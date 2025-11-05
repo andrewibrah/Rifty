@@ -256,7 +256,7 @@ ${moodLine}
 Existing commitments:
 ${existingSummary || 'None'}
 
-Suggest up to three focused time blocks that align with the user\'s energy and priorities.
+Suggest up to three focused time blocks that align with the user's energy and priorities.
 Output ISO timestamps and keep recommendations concise.`
 
   const body = {

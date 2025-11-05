@@ -124,6 +124,7 @@ const baseCandidate = (label: RiflettIntentLabel, confidence: number): Classific
 });
 
 const DUPLICATE_THRESHOLD = 0.85;
+const DUPLICATE_MIN_PREFIX_LENGTH = 20;
 
 function pickDuplicate(records: MemoryRecord[]): MemoryRecord | null {
   return records.find((record) => record.score >= DUPLICATE_THRESHOLD) ?? null;
@@ -298,21 +299,26 @@ export function classifyRiflettIntent(params: {
     };
   }
 
-  if (duplicateMeta && recentMessages.some((m) => m.text.toLowerCase().includes(duplicateMeta.text.slice(0, 20).toLowerCase()))) {
-    reasons.push('Recent message references similar content; favour append');
-    return {
-      label: 'entry_append',
-      confidence: 0.8,
-      reasons,
-      targetEntryId: duplicateMeta.id,
-      targetEntryType: mapKindToEntryType(duplicateMeta.kind),
-      duplicateMatch: duplicateMeta,
-      topCandidates: [
-        baseCandidate('entry_append', 0.8),
-        baseCandidate('entry_discuss', 0.7),
-        baseCandidate('conversational', 0.65),
-      ],
-    };
+  if (duplicateMeta && duplicateMeta.text.length >= DUPLICATE_MIN_PREFIX_LENGTH) {
+    const duplicatePrefix = duplicateMeta.text.slice(0, DUPLICATE_MIN_PREFIX_LENGTH).toLowerCase();
+    const recentMatch = recentMessages.some((m) => m.text.toLowerCase().includes(duplicatePrefix));
+
+    if (recentMatch) {
+      reasons.push('Recent message references similar content; favour append');
+      return {
+        label: 'entry_append',
+        confidence: 0.8,
+        reasons,
+        targetEntryId: duplicateMeta.id,
+        targetEntryType: mapKindToEntryType(duplicateMeta.kind),
+        duplicateMatch: duplicateMeta,
+        topCandidates: [
+          baseCandidate('entry_append', 0.8),
+          baseCandidate('entry_discuss', 0.7),
+          baseCandidate('conversational', 0.65),
+        ],
+      };
+    }
   }
 
   const conversationalConfidence = isQuestion ? 0.9 : 0.82;

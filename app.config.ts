@@ -12,11 +12,20 @@ for (const fileName of envFiles) {
 }
 
 const SUPABASE_URL =
-  process.env.EXPO_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";
+  process.env.EXPO_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
+if (!SUPABASE_URL) {
+  throw new Error(
+    "SUPABASE_URL is required. Set EXPO_PUBLIC_SUPABASE_URL or SUPABASE_URL in your environment."
+  );
+}
+
 const SUPABASE_ANON_KEY =
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ??
-  process.env.SUPABASE_ANON_KEY ??
-  "";
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
+if (!SUPABASE_ANON_KEY) {
+  throw new Error(
+    "SUPABASE_ANON_KEY is required. Set EXPO_PUBLIC_SUPABASE_ANON_KEY or SUPABASE_ANON_KEY in your environment."
+  );
+}
 const FEATURE_MAINCHAT_REBRAND =
   (process.env.EXPO_PUBLIC_FEATURE_MAINCHAT_REBRAND ??
     process.env.FEATURE_MAINCHAT_REBRAND ??

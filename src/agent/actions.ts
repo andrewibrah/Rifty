@@ -1,4 +1,3 @@
-import { Memory } from '@/agent/memory';
 import type { PlannerResponse } from '@/agent/types';
 import { persistScheduleBlock } from '@/services/schedules';
 
@@ -11,6 +10,18 @@ export interface ToolExecutionResult {
   payload: Record<string, unknown>;
 }
 
+const getStartTime = (payload: Record<string, unknown>): string | null => {
+  if (typeof payload.start === 'string') return payload.start;
+  if (typeof payload.start_at === 'string') return payload.start_at;
+  return null;
+};
+
+const getEndTime = (payload: Record<string, unknown>): string | null => {
+  if (typeof payload.end === 'string') return payload.end;
+  if (typeof payload.end_at === 'string') return payload.end_at;
+  return null;
+};
+
 export async function handleToolCall(
   plan: PlannerResponse | null,
   _context: ToolExecutionContext
@@ -18,21 +29,23 @@ export async function handleToolCall(
   if (!plan) return null;
 
   if (plan.action === 'schedule.create') {
-    const payload = plan.payload ?? {};
-    const startRaw =
-      typeof payload.start === 'string'
-        ? payload.start
-        : typeof (payload as Record<string, unknown>).start_at === 'string'
-        ? (payload as Record<string, string>).start_at
-        : null;
-    const endRaw =
-      typeof payload.end === 'string'
-        ? payload.end
-        : typeof (payload as Record<string, unknown>).end_at === 'string'
-        ? (payload as Record<string, string>).end_at
-        : null;
+    const payload = (plan.payload ?? {}) as Record<string, unknown>;
+    const startRaw = getStartTime(payload);
+    const endRaw = getEndTime(payload);
+
     if (!startRaw || !endRaw) {
       throw new Error('Planner schedule payload missing start/end');
+    }
+
+    const startDate = new Date(startRaw);
+    const endDate = new Date(endRaw);
+
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      throw new Error('Invalid date format for start or end time');
+    }
+
+    if (startDate.getTime() >= endDate.getTime()) {
+      throw new Error('Schedule start time must be before end time');
     }
 
     const start = startRaw;

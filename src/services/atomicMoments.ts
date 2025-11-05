@@ -101,8 +101,12 @@ export async function updateAtomicMoment(
 }
 
 export async function deleteAtomicMoment(id: string): Promise<void> {
-  await requireUserId()
-  const { error } = await supabase.from('atomic_moments').delete().eq('id', id)
+  const userId = await requireUserId()
+  const { error } = await supabase
+    .from('atomic_moments')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', userId)
   if (error) throw error
 }
 

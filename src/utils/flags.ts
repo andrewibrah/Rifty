@@ -32,7 +32,7 @@ export function getDedupeThreshold(): number {
   const raw = process?.env?.RIFLETT_DEDUPE_THRESHOLD ??
     ((Constants.expoConfig?.extra ?? {}) as Record<string, unknown>)["RIFLETT_DEDUPE_THRESHOLD"];
   const parsed = typeof raw === "string" ? Number(raw) : typeof raw === "number" ? raw : undefined;
-  if (parsed && Number.isFinite(parsed)) {
+  if (parsed !== undefined && Number.isFinite(parsed)) {
     return parsed;
   }
   return 0.9;
