@@ -48,6 +48,8 @@ const PersonalizationSettingsScreen: React.FC<
   const [missedDayEnabled, setMissedDayEnabled] = useState(
     settings?.missed_day_notifications ?? true
   );
+  const [isUpdatingCheckin, setIsUpdatingCheckin] = useState(false);
+  const [isUpdatingMissedDay, setIsUpdatingMissedDay] = useState(false);
 
   useEffect(() => {
     setCheckinEnabled(settings?.checkin_notifications ?? true);
@@ -162,18 +164,26 @@ const PersonalizationSettingsScreen: React.FC<
               </Text>
             </View>
             <Switch
+              disabled={isUpdatingCheckin}
               value={checkinEnabled}
               onValueChange={async (value) => {
+                if (isUpdatingCheckin) {
+                  return;
+                }
                 setCheckinEnabled(value);
+                setIsUpdatingCheckin(true);
                 try {
                   await updateNotificationPreferences({
                     checkin_notifications: value,
                   });
                 } catch (error) {
+                  setCheckinEnabled(!value);
                   Alert.alert(
                     "Update failed",
                     "Unable to update notification preference."
                   );
+                } finally {
+                  setIsUpdatingCheckin(false);
                 }
               }}
             />
@@ -187,17 +197,25 @@ const PersonalizationSettingsScreen: React.FC<
             </View>
             <Switch
               value={missedDayEnabled}
+              disabled={isUpdatingMissedDay}
               onValueChange={async (value) => {
+                if (isUpdatingMissedDay) {
+                  return;
+                }
                 setMissedDayEnabled(value);
+                setIsUpdatingMissedDay(true);
                 try {
                   await updateNotificationPreferences({
                     missed_day_notifications: value,
                   });
                 } catch (error) {
+                  setMissedDayEnabled(!value);
                   Alert.alert(
                     "Update failed",
                     "Unable to update notification preference."
                   );
+                } finally {
+                  setIsUpdatingMissedDay(false);
                 }
               }}
             />

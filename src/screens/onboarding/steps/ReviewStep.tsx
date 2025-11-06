@@ -1,6 +1,7 @@
 import React from 'react'
 import { View, Text, StyleSheet, Switch } from 'react-native'
 import { getColors, spacing, radii, typography } from '@/theme'
+import type { ColorScheme } from '@/theme'
 import { useTheme } from '@/contexts/ThemeContext'
 import type { PersonalizationState } from '@/types/personalization'
 
@@ -32,7 +33,9 @@ const ReviewStep: React.FC<ReviewStepProps> = ({ state, timezone, confirmed, onC
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Goals & style</Text>
-        <Text style={styles.item}>{`Goals: ${state.goals.length ? state.goals.join(', ') : 'None'}`}</Text>
+        <Text style={styles.item}>{`Goals: ${
+          state.goals?.length ? state.goals.join(', ') : 'None'
+        }`}</Text>
         {state.extra_goal ? <Text style={styles.item}>{`Extra: ${state.extra_goal}`}</Text> : null}
         <Text style={styles.item}>{`Session length: ${state.session_length_minutes} minutes`}</Text>
       </View>
@@ -63,7 +66,7 @@ const ReviewStep: React.FC<ReviewStepProps> = ({ state, timezone, confirmed, onC
   )
 }
 
-const createStyles = (colors: any) =>
+const createStyles = (colors: ColorScheme) =>
   StyleSheet.create({
     heading: {
       fontFamily: typography.title.fontFamily,

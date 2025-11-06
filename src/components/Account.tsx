@@ -36,7 +36,7 @@ const Field = ({
 
 interface ActionButtonProps {
   title: string
-  onPress: () => void
+  onPress: () => void | Promise<void>
   disabled?: boolean
   tone?: 'primary' | 'danger' | 'neutral'
 }
@@ -150,8 +150,19 @@ export default function Account({ session }: { session: Session }) {
         />
         <ActionButton
           title="Sign Out"
-          onPress={() => {
-            void supabase.auth.signOut()
+          onPress={async () => {
+            try {
+              const { error } = await supabase.auth.signOut()
+              if (error) {
+                console.error('Failed to sign out:', error.message)
+                Alert.alert('Sign Out Error', error.message)
+              }
+            } catch (error) {
+              console.error('Failed to sign out:', error)
+              if (error instanceof Error) {
+                Alert.alert('Sign Out Error', error.message)
+              }
+            }
           }}
           tone="danger"
         />

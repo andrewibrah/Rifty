@@ -1,8 +1,10 @@
 import { resolveOpenAIApiKey } from './ai'
 import { supabase } from '../lib/supabase'
 import { getOperatingPicture } from './memory'
+import { generateUUID } from '../utils/id'
 
 export interface ScheduleSuggestion {
+  id: string
   title: string
   start: string
   end: string
@@ -143,7 +145,7 @@ export async function suggestBlocks(
   )
 
   const now = new Date()
-  const horizon = new Date(now.getTime() + 72 * 60 * 60 * 1000)
+  const horizon = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000)
 
   const { data: existingRows, error: existingError } = await supabase
     .from('schedule_blocks')
@@ -305,6 +307,7 @@ Output ISO timestamps and keep recommendations concise.`
 
     return suggestions.map((item) => {
       const base: ScheduleSuggestion = {
+        id: generateUUID(),
         title: item.title?.trim() ?? 'Focus Block',
         start: item.start,
         end: item.end,

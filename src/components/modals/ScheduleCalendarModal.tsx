@@ -156,7 +156,16 @@ const resolveEntryDate = (entry: RemoteJournalEntry): Date => {
 };
 
 const groupEntriesByDate = (entries: RemoteJournalEntry[]) => {
+  const seen = new Set<string>();
   return entries.reduce<EntryGroups>((acc, entry) => {
+    const entryId = typeof entry.id === "string" ? entry.id : null;
+    if (entryId) {
+      if (seen.has(entryId)) {
+        return acc;
+      }
+      seen.add(entryId);
+    }
+
     const key = formatDateKey(resolveEntryDate(entry));
     if (!acc[key]) {
       acc[key] = [];
@@ -312,9 +321,7 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
           },
         });
         await fetchEntries();
-        setScheduleSuggestions((prev) =>
-          prev.filter((item) => item.start !== suggestion.start || item.end !== suggestion.end)
-        );
+        setScheduleSuggestions((prev) => prev.filter((item) => item.id !== suggestion.id));
         setSelectedScheduleId(created.id ?? null);
         setSuggestionsError(null);
       } catch (err) {
@@ -600,7 +607,7 @@ const ScheduleCalendarModal: React.FC<ScheduleCalendarModalProps> = ({
                     </Text>
                   ) : (
                     scheduleSuggestions.map((suggestion) => (
-                      <View key={`${suggestion.start}-${suggestion.end}`} style={styles.suggestionCard}>
+                      <View key={suggestion.id} style={styles.suggestionCard}>
                         <View style={styles.suggestionHeader}>
                           <Text style={styles.suggestionTitle}>{suggestion.title}</Text>
                           <Text style={styles.suggestionTime}>

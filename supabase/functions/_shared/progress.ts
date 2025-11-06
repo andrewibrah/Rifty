@@ -10,6 +10,13 @@ import {
   type ReflectionRecord,
 } from "./goalMetrics.ts";
 
+interface Goal {
+  id: string;
+  micro_steps?: MicroStep[] | null;
+  embedding?: number[] | null;
+  status?: string | null;
+}
+
 async function fetchReflections(goalId: string, userId: string) {
   const { data, error } = await supabaseAdminClient
     .from("goal_reflections")
@@ -54,7 +61,7 @@ async function fetchEntryEmbeddings(entryIds: string[]) {
 }
 
 export async function recomputeGoalProgress(options: {
-  goal: any;
+  goal: Goal;
   userId: string;
 }): Promise<{
   progress_pct: number;
@@ -63,11 +70,12 @@ export async function recomputeGoalProgress(options: {
 }> {
   const { goal, userId } = options;
   const reflections = await fetchReflections(goal.id, userId);
+  const microSteps = Array.isArray(goal.micro_steps) ? goal.micro_steps : [];
   const entryEmbeddingsMap = await fetchEntryEmbeddings(
     reflections.map((reflection) => reflection.entry_id),
   );
 
-  const progress = computeProgress((goal.micro_steps ?? []) as MicroStep[]);
+  const progress = computeProgress(microSteps);
   const reflectionRecords: ReflectionRecord[] = reflections.map((reflection) => ({
     alignment_score: reflection.alignment_score,
     created_at: reflection.created_at,
@@ -77,9 +85,9 @@ export async function recomputeGoalProgress(options: {
 
   const reflectionDensity = computeReflectionDensity(reflectionRecords);
   const emotionalConsistency = computeEmotionalConsistency(reflectionRecords);
-  const momentum = computeMomentum((goal.micro_steps ?? []) as MicroStep[]);
+  const momentum = computeMomentum(microSteps);
   const drift = computeDrift(
-    Array.isArray(goal.embedding) ? (goal.embedding as number[]) : null,
+    Array.isArray(goal.embedding) ? goal.embedding : null,
     reflectionRecords.map((record) => record.entry_embedding ?? null),
   );
 

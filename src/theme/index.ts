@@ -59,6 +59,8 @@ export const getColors = (themeMode: ThemeMode = 'dark') => {
   return themeMode === 'dark' ? darkColors : lightColors;
 };
 
+export type ColorScheme = ReturnType<typeof getColors>;
+
 // Default export for backward compatibility
 export const colors = darkColors;
 

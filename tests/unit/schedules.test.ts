@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { persistScheduleBlock } from '@/services/schedules';
 import { supabase } from '@/lib/supabase';
 

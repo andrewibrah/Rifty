@@ -1,14 +1,13 @@
-// @ts-nocheck
 import { describe, it, expect } from 'vitest';
-import type { MemoryRecord } from '@/agent/memory';
+import type { MemoryRecord, MemoryKind } from '@/agent/memory';
 import { scoreContextRecords } from '@/agent/pipeline';
 
-const createRecord = (id: string, kind: string, ts: number, score: number): MemoryRecord => ({
+const createRecord = (id: string, kind: MemoryKind, ts: number, score: number): MemoryRecord => ({
   id,
-  kind: kind as any,
+  kind,
   text: `record-${id}`,
   ts,
-  embedding: [],
+  embedding: [] as number[],
   score,
 });
 

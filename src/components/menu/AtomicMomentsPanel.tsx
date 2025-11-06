@@ -11,6 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../../contexts/ThemeContext";
 import { getColors, radii, spacing, typography } from "../../theme";
+import type { ColorScheme } from "../../theme";
 import {
   searchAtomicMoments,
   type AtomicMomentRecord,
@@ -133,7 +134,7 @@ const AtomicMomentsPanel: React.FC<AtomicMomentsPanelProps> = ({ onClose }) => {
   );
 };
 
-const createStyles = (colors: any) =>
+const createStyles = (colors: ColorScheme) =>
   StyleSheet.create({
     container: {
       flex: 1,

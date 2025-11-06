@@ -1,6 +1,7 @@
 import React from 'react'
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
 import { getColors, spacing, radii, typography } from '../theme'
+import type { ColorScheme } from '../theme'
 import { useTheme } from '../contexts/ThemeContext'
 import type { CheckInType } from '../types/mvp'
 
@@ -60,7 +61,7 @@ export default function CheckInBanner({
   )
 }
 
-const createStyles = (colors: any) =>
+const createStyles = (colors: ColorScheme) =>
   StyleSheet.create({
     container: {
       backgroundColor: colors.accent + '15',
