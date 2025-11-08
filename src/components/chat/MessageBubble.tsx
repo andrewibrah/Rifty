@@ -1,49 +1,133 @@
 import React, { memo, useMemo, useState, useEffect } from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Animated,
+} from "react-native";
 import type { ChatMessage } from "../../types/chat";
 import { getColors, radii, spacing, typography, shadows } from "../../theme";
 import { useTheme } from "../../contexts/ThemeContext";
 
 /**
+ * Loading Dots Component
+ * Animated dots that indicate the bot is thinking
+ */
+const LoadingDots = ({ style }: { style: any }) => {
+  const [dot1] = useState(new Animated.Value(0));
+  const [dot2] = useState(new Animated.Value(0));
+  const [dot3] = useState(new Animated.Value(0));
+
+  useEffect(() => {
+    const createAnimation = (dot: Animated.Value, delay: number) => {
+      return Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(dot, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+          Animated.timing(dot, {
+            toValue: 0,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+    };
+
+    const anim1 = createAnimation(dot1, 0);
+    const anim2 = createAnimation(dot2, 150);
+    const anim3 = createAnimation(dot3, 300);
+
+    anim1.start();
+    anim2.start();
+    anim3.start();
+
+    return () => {
+      anim1.stop();
+      anim2.stop();
+      anim3.stop();
+    };
+  }, [dot1, dot2, dot3]);
+
+  const getDotStyle = (animValue: Animated.Value) => ({
+    opacity: animValue.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.3, 1],
+    }),
+    transform: [
+      {
+        translateY: animValue.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, -4],
+        }),
+      },
+    ],
+  });
+
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+      <Animated.Text style={[style, getDotStyle(dot1)]}>●</Animated.Text>
+      <Animated.Text style={[style, getDotStyle(dot2)]}>●</Animated.Text>
+      <Animated.Text style={[style, getDotStyle(dot3)]}>●</Animated.Text>
+    </View>
+  );
+};
+
+/**
  * Typewriter Text Component
  * Displays text character by character for a typing effect
+ * Shows streaming text immediately when message is being sent
  */
 const TypewriterText = ({
   text,
   style,
-  speed = 20, // ms per character
+  speed = 15, // ms per character
+  isStreaming = false, // True when actively receiving tokens
 }: {
   text: string;
   style: any;
   speed?: number;
+  isStreaming?: boolean;
 }) => {
   const [displayedText, setDisplayedText] = useState("");
-  const [isComplete, setIsComplete] = useState(false);
+  const [targetText, setTargetText] = useState("");
+  const previousLength = React.useRef(0);
 
   useEffect(() => {
-    // Reset on text change
-    setDisplayedText("");
-    setIsComplete(false);
-
-    if (!text) {
+    // If streaming, show text immediately as it arrives (no typewriter during stream)
+    if (isStreaming) {
+      setDisplayedText(text);
+      setTargetText(text);
+      previousLength.current = text.length;
       return;
     }
 
-    let currentIndex = 0;
-    const interval = setInterval(() => {
-      if (currentIndex < text.length) {
-        setDisplayedText(text.slice(0, currentIndex + 1));
-        currentIndex++;
-      } else {
-        setIsComplete(true);
-        clearInterval(interval);
-      }
-    }, speed);
+    // If not streaming and text just arrived (changed from empty or stopped growing),
+    // animate from current position to full text
+    if (!isStreaming && text && text !== targetText) {
+      setTargetText(text);
 
-    return () => clearInterval(interval);
-  }, [text, speed]);
+      // Start from where we left off
+      let currentIndex = displayedText.length;
 
-  return <Text style={style}>{displayedText}</Text>;
+      const interval = setInterval(() => {
+        if (currentIndex < text.length) {
+          setDisplayedText(text.slice(0, currentIndex + 1));
+          currentIndex++;
+        } else {
+          clearInterval(interval);
+        }
+      }, speed);
+
+      return () => clearInterval(interval);
+    }
+  }, [text, speed, isStreaming, targetText, displayedText.length]);
+
+  return <Text style={style}>{displayedText || text}</Text>;
 };
 
 interface MessageBubbleProps {
@@ -138,11 +222,22 @@ const MessageBubble = memo(
                   </View>
                 )}
                 {isBot ? (
-                  <TypewriterText
-                    text={message.content}
-                    style={[styles.content, styles.botContent]}
-                    speed={15}
-                  />
+                  message.status === "sending" && !message.content ? (
+                    <LoadingDots
+                      style={[
+                        styles.content,
+                        styles.botContent,
+                        styles.loadingDots,
+                      ]}
+                    />
+                  ) : (
+                    <TypewriterText
+                      text={message.content}
+                      style={[styles.content, styles.botContent]}
+                      speed={15}
+                      isStreaming={message.status === "sending"}
+                    />
+                  )
                 ) : (
                   <Text style={[styles.content, styles.userContent]}>
                     {message.content}
@@ -264,6 +359,10 @@ const createStyles = (colors: any) =>
     },
     userContent: {
       color: colors.textPrimary,
+    },
+    loadingDots: {
+      fontSize: 10,
+      paddingVertical: spacing.xs,
     },
     intentContainer: {
       flexDirection: "row",

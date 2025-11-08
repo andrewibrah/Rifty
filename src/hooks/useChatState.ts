@@ -13,6 +13,7 @@ import {
   type EntryType,
   getJournalEntryById,
   updateJournalEntry,
+  type RemoteMessage,
 } from "../services/data";
 import { createEntryFromChat } from "../lib/entries";
 import type {
@@ -354,6 +355,41 @@ export const useChatState = (
       const entries = await listJournals({ limit: 200 });
       const chatMessages: ChatMessage[] = [];
 
+      // Load all messages from the database for these entries
+      const entryIds = entries
+        .map((e) => e.id)
+        .filter((id): id is string => Boolean(id));
+      
+      // Fetch messages for all entries
+      const messagesByEntry: Map<string, { user: RemoteMessage | null; assistant: RemoteMessage | null }> = new Map();
+      
+      if (entryIds.length > 0) {
+        try {
+          const { data: messagesData, error: messagesError } = await supabase
+            .from("messages")
+            .select("*")
+            .in("conversation_id", entryIds)
+            .order("created_at", { ascending: true });
+
+          if (!messagesError && messagesData) {
+            messagesData.forEach((msg) => {
+              const convId = msg.conversation_id;
+              if (!messagesByEntry.has(convId)) {
+                messagesByEntry.set(convId, { user: null, assistant: null });
+              }
+              const entry = messagesByEntry.get(convId)!;
+              if (msg.role === "user") {
+                entry.user = msg as RemoteMessage;
+              } else if (msg.role === "assistant") {
+                entry.assistant = msg as RemoteMessage;
+              }
+            });
+          }
+        } catch (err) {
+          console.warn("[loadMessages] Failed to load messages from database:", err);
+        }
+      }
+
       entries
         .slice()
         .sort(
@@ -394,16 +430,21 @@ export const useChatState = (
           }
           chatMessages.push(entryMessage);
 
-          // Add bot response if exists
-          // (We'll reconstruct from metadata later)
+          // Load bot response from database if it exists
+          const messagesForEntry = messagesByEntry.get(entry.id);
+          const assistantMsg = messagesForEntry?.assistant;
+          
+          const botContent = assistantMsg?.content 
+            ?? (baseMeta?.reply as string | undefined)
+            ?? (baseMeta?.note?.guidance as string | undefined) 
+            ?? successMessages[entry.type];
+
           const botMessage: BotMessage = {
-            id: `bot-${entry.id}`,
+            id: assistantMsg?.id ?? `bot-${entry.id}`,
             kind: "bot",
             afterId: entry.id,
-            content:
-              (baseMeta?.note?.guidance as string | undefined) ??
-              successMessages[entry.type],
-            created_at: createdAt,
+            content: botContent,
+            created_at: assistantMsg?.created_at ?? createdAt,
             status: "sent",
           };
           chatMessages.push(botMessage);
