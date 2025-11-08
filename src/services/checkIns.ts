@@ -1,4 +1,3 @@
-import { fromZonedTime } from "date-fns-tz";
 import { supabase } from "../lib/supabase";
 import type {
   CheckIn,
@@ -210,7 +209,7 @@ export async function scheduleDailyCheckIns(
   const now = new Date();
   const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
-  // Morning check-in at 8 AM
+  // Morning check-in at 8 AM (in local time)
   const morningTime = new Date(
     tomorrow.getFullYear(),
     tomorrow.getMonth(),
@@ -220,7 +219,7 @@ export async function scheduleDailyCheckIns(
     0
   );
 
-  // Evening check-in at 8 PM
+  // Evening check-in at 8 PM (in local time)
   const eveningTime = new Date(
     tomorrow.getFullYear(),
     tomorrow.getMonth(),
@@ -230,19 +229,16 @@ export async function scheduleDailyCheckIns(
     0
   );
 
-  const morningTimeUtc = fromZonedTime(morningTime, timezone);
-  const eveningTimeUtc = fromZonedTime(eveningTime, timezone);
-
   await Promise.all([
     createCheckIn({
       type: "daily_morning",
       prompt: getPromptForType("daily_morning"),
-      scheduled_for: morningTimeUtc.toISOString(),
+      scheduled_for: morningTime.toISOString(),
     }),
     createCheckIn({
       type: "daily_evening",
       prompt: getPromptForType("daily_evening"),
-      scheduled_for: eveningTimeUtc.toISOString(),
+      scheduled_for: eveningTime.toISOString(),
     }),
   ]);
 }
@@ -268,7 +264,7 @@ export async function scheduleWeeklyCheckIn(
     now.getTime() + daysUntilSunday * 24 * 60 * 60 * 1000
   );
 
-  // Sunday at 6 PM
+  // Sunday at 6 PM (in local time)
   const weeklyTime = new Date(
     nextSunday.getFullYear(),
     nextSunday.getMonth(),
@@ -278,12 +274,10 @@ export async function scheduleWeeklyCheckIn(
     0
   );
 
-  const weeklyTimeUtc = fromZonedTime(weeklyTime, timezone);
-
   await createCheckIn({
     type: "weekly",
     prompt: getPromptForType("weekly"),
-    scheduled_for: weeklyTimeUtc.toISOString(),
+    scheduled_for: weeklyTime.toISOString(),
   });
 }
 

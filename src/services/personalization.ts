@@ -51,15 +51,15 @@ const normalizePrivacyGates = (value: unknown): PrivacyGateMap => {
           typeof raw.key === "string"
             ? raw.key
             : typeof raw.id === "string"
-            ? raw.id
-            : null;
+              ? raw.id
+              : null;
         if (!key) continue;
         const allowed =
           typeof raw.allowed === "boolean"
             ? raw.allowed
             : typeof raw.value === "boolean"
-            ? raw.value
-            : true;
+              ? raw.value
+              : true;
         gates[key] = allowed;
       }
     }
@@ -69,9 +69,7 @@ const normalizePrivacyGates = (value: unknown): PrivacyGateMap => {
   }
 
   if (typeof value === "object") {
-    for (const [key, raw] of Object.entries(
-      value as Record<string, unknown>
-    )) {
+    for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
       if (!key) continue;
       let allowed = true;
       if (typeof raw === "boolean") {
@@ -290,59 +288,49 @@ const fetchSettings = async (userId: string): Promise<UserSettings | null> => {
 export const fetchPersonalizationBundle = async (
   uid?: string
 ): Promise<PersonalizationBundle | null> => {
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
+  // Try cached settings first for faster response
+  const cachedSettings = await loadCachedSettings();
 
-  if (authError) {
-    console.warn("[personalization] auth.getUser failed", authError);
-  }
+  const { data, error } =
+    await supabase.functions.invoke<PersonalizationBundle>(
+      "fetch_personalization_bundle",
+      {
+        method: "POST",
+        body: {},
+      }
+    );
 
-  const userId = uid ?? user?.id ?? null;
-  if (!userId) {
+  if (error) {
+    console.error("[fetchPersonalizationBundle] Edge function error:", error);
+    // Fall back to cached settings if edge function fails
+    if (cachedSettings) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const userId = uid ?? user?.id ?? null;
+      if (userId) {
+        const profile = buildFallbackProfile(userId);
+        const runtime = buildRuntimePreferences(cachedSettings, {});
+        return {
+          ...runtime,
+          profile,
+          settings: cachedSettings,
+        };
+      }
+    }
     return null;
   }
 
-  const [profile, cachedSettings, remoteSettings, featureMap] =
-    await Promise.all([
-      fetchProfile(userId, user ?? null),
-      loadCachedSettings(),
-      fetchSettings(userId),
-      fetchFeatureMap(userId),
-    ]);
-
-  const normalizedRemote = remoteSettings
-    ? { ...remoteSettings, updated_at: remoteSettings.updated_at ?? nowIso() }
-    : null;
-  const normalizedCached = cachedSettings
-    ? { ...cachedSettings, updated_at: cachedSettings.updated_at ?? nowIso() }
-    : null;
-
-  let resolvedSettings: UserSettings | null = null;
-
-  if (normalizedRemote && normalizedCached) {
-    const remoteUpdated = parseIsoDate(normalizedRemote.updated_at);
-    const cachedUpdated = parseIsoDate(normalizedCached.updated_at);
-    resolvedSettings =
-      remoteUpdated >= cachedUpdated ? normalizedRemote : normalizedCached;
-    if (remoteUpdated >= cachedUpdated) {
-      await storeCachedSettings(normalizedRemote);
-    }
-  } else if (normalizedRemote) {
-    resolvedSettings = normalizedRemote;
-    await storeCachedSettings(normalizedRemote);
-  } else if (normalizedCached) {
-    resolvedSettings = normalizedCached;
+  if (!data) {
+    return null;
   }
 
-  const runtime = buildRuntimePreferences(resolvedSettings, featureMap);
+  // Update cache with fresh server data
+  if (data.settings) {
+    await storeCachedSettings(data.settings);
+  }
 
-  return {
-    ...runtime,
-    profile,
-    settings: resolvedSettings,
-  };
+  return data;
 };
 
 interface PersistOptions {
@@ -356,101 +344,53 @@ export const persistPersonalization = async (
   state: PersonalizationState,
   options: PersistOptions
 ): Promise<PersonaTag> => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    throw new Error("User not authenticated");
-  }
-
   const personaTag = computePersonaTag(state);
 
   // Create a clean state object without custom_goals
   const cleanState = { ...state };
   delete (cleanState as any).custom_goals;
 
+  interface PersistResponse {
+    persona_tag: string;
+    updated_at: string;
+  }
+
+  const { data, error } = await supabase.functions.invoke<PersistResponse>(
+    "persist_personalization",
+    {
+      method: "POST",
+      body: {
+        state: cleanState,
+        options: {
+          profileTimezone: options.profileTimezone,
+          onboardingCompleted: options.onboardingCompleted,
+          rationale: options.rationale,
+          source: options.source,
+        },
+      },
+    }
+  );
+
+  if (error) {
+    console.error("[persistPersonalization] Edge function error:", error);
+    throw error;
+  }
+
+  if (!data) {
+    throw new Error("persist_personalization edge function returned no data");
+  }
+
+  // Update local cache
   const payload: UserSettings = {
     ...cleanState,
-    persona_tag: personaTag,
-    updated_at: nowIso(),
-    user_id: user.id,
+    persona_tag: data.persona_tag,
+    updated_at: data.updated_at,
+    user_id: "", // Will be ignored in cache
   };
-
-  const { error: settingsError } = await supabase
-    .from("user_settings")
-    .upsert(payload, { onConflict: "user_id" });
-  if (settingsError) {
-    console.error("Failed to upsert user settings", settingsError);
-    throw settingsError;
-  }
-
-  const profileUpdatePayload: Record<string, any> = {
-    timezone: options.profileTimezone,
-    onboarding_completed: options.onboardingCompleted,
-    updated_at: nowIso(),
-  };
-
-  const { error: profileError } = await supabase
-    .from("profiles")
-    .update(profileUpdatePayload)
-    .eq("id", user.id);
-
-  if (profileError) {
-    if (profileError.code === "42703") {
-      const fallbackPayload = { ...profileUpdatePayload };
-      delete fallbackPayload.timezone;
-      const { error: fallbackError } = await supabase
-        .from("profiles")
-        .update(fallbackPayload)
-        .eq("id", user.id);
-      if (fallbackError) {
-        console.error(
-          "Failed to update profile without timezone column",
-          fallbackError
-        );
-        throw fallbackError;
-      }
-    } else {
-      console.error("Failed to update profile", profileError);
-      throw profileError;
-    }
-  }
 
   await storeCachedSettings(payload);
 
-  const signal: PersonaSignalPayload = {
-    source: options.source,
-    rationale: options.rationale,
-    changes: payload,
-  };
-
-  try {
-    await supabase.from("persona_signals").insert({
-      user_id: user.id,
-      source: signal.source,
-      rationale: signal.rationale,
-      payload: signal,
-    });
-  } catch (error) {
-    console.warn("Unable to record persona signal, caching for later", error);
-    try {
-      const raw = await AsyncStorage.getItem("@reflectify:persona_queue");
-      const queue = raw ? JSON.parse(raw) : [];
-      queue.push({
-        rationale: signal.rationale,
-        payload: signal,
-        created_at: nowIso(),
-      });
-      await AsyncStorage.setItem(
-        "@reflectify:persona_queue",
-        JSON.stringify(queue)
-      );
-    } catch (storageError) {
-      console.error("Failed to cache persona signal", storageError);
-    }
-  }
-
-  return personaTag;
+  return data.persona_tag as PersonaTag;
 };
 
 export const updateNotificationPreferences = async (prefs: {
@@ -475,13 +415,14 @@ export const updateNotificationPreferences = async (prefs: {
     return;
   }
 
-  const { error } = await supabase
-    .from("user_settings")
-    .upsert({
+  const { error } = await supabase.from("user_settings").upsert(
+    {
       user_id: user.id,
       ...payload,
       updated_at: nowIso(),
-    }, { onConflict: "user_id" });
+    },
+    { onConflict: "user_id" }
+  );
 
   if (error) {
     throw error;

@@ -31,3 +31,63 @@ entrypoint = "./functions/context_rebuilder/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/failure_tracker/index.ts"
+
+[functions.get_operating_picture]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/get_operating_picture/index.ts"
+
+[functions.rag_search]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/rag_search/index.ts"
+
+[functions.create_goal]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/create_goal/index.ts"
+
+[functions.analyst_query]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/analyst_query/index.ts"
+
+[functions.process_entry_mvp]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/process_entry_mvp/index.ts"
+
+[functions.link_reflections]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/link_reflections/index.ts"
+
+[functions.main_chat_goal_recall]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/main_chat_goal_recall/index.ts"
+
+[functions.compute_goal_health]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/compute_goal_health/index.ts"
+
+[functions.update_goal]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/update_goal/index.ts"
+
+[functions.goals_list_with_context]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/goals_list_with_context/index.ts"
+
+[functions.create_entry_from_chat]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/create_entry_from_chat/index.ts"
+
+[functions.persist_user_facts]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/persist_user_facts/index.ts"

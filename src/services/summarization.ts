@@ -1,207 +1,93 @@
-import Constants from 'expo-constants'
-import { supabase } from '../lib/supabase'
-import { resolveOpenAIApiKey } from './ai'
+import { supabase } from "../lib/supabase";
 import type {
   EntrySummary,
   CreateEntrySummaryParams,
   SummarizeEntryResult,
   GoalDetectionResult,
-} from '../types/mvp'
-import { isUUID } from '../utils/uuid'
+} from "../types/mvp";
+import { isUUID } from "../utils/uuid";
 
-const MODEL_NAME = 'gpt-4o-mini' as const
+interface SummarizeEntryEdgeResponse {
+  summary: SummarizeEntryResult;
+  stored_summary?: EntrySummary | null;
+}
+
+interface SummarizeEntryEdgePayload {
+  content: string;
+  entryType: string;
+  entryId?: string;
+  store?: boolean;
+}
+
+export interface SummarizeEntryOptions {
+  entryId?: string;
+  store?: boolean;
+}
 
 /**
  * Summarize an entry using OpenAI with structured extraction
  */
 export async function summarizeEntry(
   content: string,
-  entryType: string
+  entryType: string,
+  options: SummarizeEntryOptions = {}
 ): Promise<SummarizeEntryResult> {
-  const apiKey = resolveOpenAIApiKey()
-  const ctrl = new AbortController()
-  const timeout = setTimeout(() => ctrl.abort(), 45000)
+  const payload: SummarizeEntryEdgePayload = {
+    content,
+    entryType,
+  };
 
-  const systemPrompt = `You are Riflett, a reflective coach. Analyze the user's entry and provide:
-1. A 2-3 line summary (no fluff)
-2. Core emotion (single word or phrase)
-3. Topic tags (max 5, lowercase)
-4. People mentioned (names only)
-5. Urgency level (0-10)
-6. One suggested next action
-7. Any blockers mentioned
-8. Dates/deadlines mentioned
-9. A brief reflection (1-2 sentences, warm and constructive)
-
-Entry type: ${entryType}`
-
-  const tools = [
-    {
-      type: 'function',
-      function: {
-        name: 'emit_summary',
-        description: 'Return structured summary and reflection for the entry',
-        parameters: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['summary', 'reflection'],
-          properties: {
-            summary: { type: 'string' },
-            emotion: { type: 'string' },
-            topics: { type: 'array', items: { type: 'string' } },
-            people: { type: 'array', items: { type: 'string' } },
-            urgency_level: { type: 'number', minimum: 0, maximum: 10 },
-            suggested_action: { type: 'string' },
-            blockers: { type: 'string' },
-            dates_mentioned: { type: 'array', items: { type: 'string' } },
-            reflection: { type: 'string' },
-          },
-        },
-      },
-    },
-  ] as const
-
-  const body = {
-    model: MODEL_NAME,
-    temperature: 0.7,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content },
-    ],
-    tools,
-    tool_choice: { type: 'function', function: { name: 'emit_summary' } },
+  if (options.entryId) {
+    payload.entryId = options.entryId;
+  }
+  if (options.store !== undefined) {
+    payload.store = options.store;
   }
 
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    })
+  const { data, error } =
+    await supabase.functions.invoke<SummarizeEntryEdgeResponse>(
+      "summarize_entry",
+      {
+        method: "POST",
+        body: payload,
+      }
+    );
 
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => '')
-      console.warn('[OpenAI Summarization] Error:', response.status, errorBody)
-      throw new Error('Failed to summarize entry')
-    }
-
-    const data = await response.json()
-    const msg = data?.choices?.[0]?.message
-    const toolCall = msg?.tool_calls?.[0]
-    const argStr: string | undefined = toolCall?.function?.arguments
-
-    if (!argStr) {
-      throw new Error('OpenAI response missing tool call')
-    }
-
-    const parsed = JSON.parse(argStr) as SummarizeEntryResult
-    return parsed
-  } catch (error: any) {
-    if (error?.name === 'AbortError') {
-      throw new Error('Summarization request timed out')
-    }
-    console.error('[OpenAI Summarization] Error:', error)
-    throw error
-  } finally {
-    clearTimeout(timeout)
+  if (error) {
+    console.error("[summarizeEntry] Edge function error:", error);
+    throw error;
   }
+
+  if (!data?.summary) {
+    throw new Error("summarize_entry edge function returned no summary");
+  }
+
+  return data.summary;
 }
 
 /**
  * Detect if entry implies a goal
  */
-export async function detectGoal(content: string): Promise<GoalDetectionResult> {
-  const apiKey = resolveOpenAIApiKey()
-  const ctrl = new AbortController()
-  const timeout = setTimeout(() => ctrl.abort(), 30000)
-
-  const systemPrompt = `Analyze if this entry implies a goal or objective. If yes, extract:
-- Suggested title (short, actionable)
-- Description (1-2 sentences)
-- Category (health, relationships, career, creativity, etc.)
-- 2-3 micro-steps to start
-
-Respond with structured JSON.`
-
-  const tools = [
+export async function detectGoal(
+  content: string
+): Promise<GoalDetectionResult> {
+  const { data, error } = await supabase.functions.invoke<GoalDetectionResult>(
+    "detect_goal",
     {
-      type: 'function',
-      function: {
-        name: 'emit_goal_detection',
-        description: 'Return goal detection result',
-        parameters: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['goal_detected'],
-          properties: {
-            goal_detected: { type: 'boolean' },
-            suggested_title: { type: 'string' },
-            suggested_description: { type: 'string' },
-            suggested_category: { type: 'string' },
-            suggested_micro_steps: { type: 'array', items: { type: 'string' } },
-          },
-        },
-      },
-    },
-  ] as const
+      method: "POST",
+      body: { content },
+    }
+  );
 
-  const body = {
-    model: MODEL_NAME,
-    temperature: 0.3,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content },
-    ],
-    tools,
-    tool_choice: {
-      type: 'function',
-      function: { name: 'emit_goal_detection' },
-    },
+  if (error) {
+    if ((error as any)?.status === 401) {
+      throw error;
+    }
+    console.warn("[detectGoal] Edge function error:", error);
+    return { goal_detected: false };
   }
 
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    })
-
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => '')
-      console.warn('[OpenAI Goal Detection] Error:', response.status, errorBody)
-      // Return no goal detected on error
-      return { goal_detected: false }
-    }
-
-    const data = await response.json()
-    const msg = data?.choices?.[0]?.message
-    const toolCall = msg?.tool_calls?.[0]
-    const argStr: string | undefined = toolCall?.function?.arguments
-
-    if (!argStr) {
-      return { goal_detected: false }
-    }
-
-    const parsed = JSON.parse(argStr) as GoalDetectionResult
-    return parsed
-  } catch (error: any) {
-    if (error?.name === 'AbortError') {
-      console.warn('[OpenAI Goal Detection] Timeout')
-    } else {
-      console.error('[OpenAI Goal Detection] Error:', error)
-    }
-    return { goal_detected: false }
-  } finally {
-    clearTimeout(timeout)
-  }
+  return data ?? { goal_detected: false };
 }
 
 /**
@@ -210,38 +96,24 @@ Respond with structured JSON.`
 export async function storeEntrySummary(
   params: CreateEntrySummaryParams
 ): Promise<EntrySummary> {
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-
-  if (authError || !user) {
-    throw new Error('User not authenticated')
-  }
-
-  const { data, error } = await supabase
-    .from('entry_summaries')
-    .insert({
-      entry_id: params.entry_id,
-      user_id: user.id,
-      summary: params.summary,
-      emotion: params.emotion ?? null,
-      topics: params.topics ?? [],
-      people: params.people ?? [],
-      urgency_level: params.urgency_level ?? null,
-      suggested_action: params.suggested_action ?? null,
-      blockers: params.blockers ?? null,
-      dates_mentioned: params.dates_mentioned ?? null,
-    })
-    .select()
-    .single()
+  const { data, error } = await supabase.functions.invoke<EntrySummary>(
+    "store_entry_summary",
+    {
+      method: "POST",
+      body: params,
+    }
+  );
 
   if (error) {
-    console.error('[storeEntrySummary] Error:', error)
-    throw error
+    console.error("[storeEntrySummary] Edge function error:", error);
+    throw error;
   }
 
-  return data as EntrySummary
+  if (!data) {
+    throw new Error("store_entry_summary edge function returned no data");
+  }
+
+  return data;
 }
 
 /**
@@ -253,67 +125,72 @@ export async function getEntrySummary(
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    throw new Error('User not authenticated')
+    throw new Error("User not authenticated");
   }
 
   if (!isUUID(entryId)) {
-    console.warn('[getEntrySummary] Skipping lookup for invalid entry id', entryId)
-    return null
+    console.warn(
+      "[getEntrySummary] Skipping lookup for invalid entry id",
+      entryId
+    );
+    return null;
   }
 
   const { data, error } = await supabase
-    .from('entry_summaries')
-    .select('*')
-    .eq('entry_id', entryId)
-    .eq('user_id', user.id)
-    .maybeSingle()
+    .from("entry_summaries")
+    .select("*")
+    .eq("entry_id", entryId)
+    .eq("user_id", user.id)
+    .maybeSingle();
 
   if (error) {
-    console.error('[getEntrySummary] Error:', error)
-    throw error
+    console.error("[getEntrySummary] Error:", error);
+    throw error;
   }
 
-  return data as EntrySummary | null
+  return data as EntrySummary | null;
 }
 
 /**
  * Get all summaries for a user
  */
-export async function listEntrySummaries(options: {
-  limit?: number
-  before?: string
-} = {}): Promise<EntrySummary[]> {
+export async function listEntrySummaries(
+  options: {
+    limit?: number;
+    before?: string;
+  } = {}
+): Promise<EntrySummary[]> {
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    throw new Error('User not authenticated')
+    throw new Error("User not authenticated");
   }
 
-  const limit = options.limit ?? 50
+  const limit = options.limit ?? 50;
 
   let query = supabase
-    .from('entry_summaries')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
-    .limit(limit)
+    .from("entry_summaries")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(limit);
 
   if (options.before) {
-    query = query.lt('created_at', options.before)
+    query = query.lt("created_at", options.before);
   }
 
-  const { data, error } = await query
+  const { data, error } = await query;
 
   if (error) {
-    console.error('[listEntrySummaries] Error:', error)
-    throw error
+    console.error("[listEntrySummaries] Error:", error);
+    throw error;
   }
 
-  return (data ?? []) as EntrySummary[]
+  return (data ?? []) as EntrySummary[];
 }

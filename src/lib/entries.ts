@@ -1,9 +1,5 @@
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "./supabase";
 import type { EntryType } from "../services/data";
-import { updateJournalEntry } from "../services/data";
-import { summarizeEntry, storeEntrySummary } from "../services/summarization";
-import { embedEntry } from "../services/embeddings";
-import { createAtomicMoment } from "../services/atomicMoments";
 import { isGoalsV2Enabled } from "../utils/flags";
 import type { Goal } from "../types/goal";
 import type {
@@ -19,7 +15,7 @@ import type {
   PlannerResponse,
 } from "@/agent/types";
 import type { MemoryRecord } from "@/agent/memory";
-import type { CreateEntrySummaryParams } from "../types/mvp";
+import { createEntryFromChatEdge } from "../services/edgeFunctions";
 
 export interface ClassifiedEntry {
   id: string;
@@ -98,162 +94,22 @@ export interface ProcessedEntryResult {
 export async function createEntryFromChat(
   args: CreateEntryFromChatArgs
 ): Promise<ClassifiedEntry> {
-  const trimmedContent = args.content.trim();
-  if (!trimmedContent) {
-    throw new Error("Content is required");
-  }
-
-  const { data: userResult, error: userError } = await supabase.auth.getUser();
-  if (userError) {
-    throw userError;
-  }
-  const userId = userResult.user?.id;
-  if (!userId) {
-    throw new Error("No active session");
-  }
-
-  const metadata = {
-    subsystem: args.intent.subsystem,
-    searchTag: args.note?.searchTag ?? null,
-    noteDraft: args.note,
-    nativeIntent: args.nativeIntent ?? null,
-    routing: args.decision ?? null,
-    slots: args.enriched?.intent.slots ?? {},
-    memoryMatches: args.memoryMatches ?? [],
-    redaction: args.redaction?.replacementMap ?? {},
-    plan: args.plan ?? null,
-  };
-
-  const aiMeta = {
-    intent: {
-      id: args.intent.id,
-      rawLabel: args.intent.rawLabel,
-      label: args.intent.label,
-      confidence: args.intent.confidence,
-      subsystem: args.intent.subsystem,
-      probabilities: args.intent.probabilities,
-    },
-    note: args.note,
+  const entry = await createEntryFromChatEdge({
+    content: args.content,
+    entryType: args.entryType,
+    intent: args.intent,
+    note: args.note ?? undefined,
     processingTimeline: args.processingTimeline,
-    nativeIntent: args.nativeIntent ?? null,
-    routing: args.decision ?? null,
-    enriched: args.enriched ?? null,
-    memoryMatches: args.memoryMatches ?? [],
-    redaction: args.redaction?.replacementMap ?? {},
-    plan: args.plan ?? null,
-  };
+    nativeIntent: args.nativeIntent ?? undefined,
+    enriched: args.enriched ?? undefined,
+    decision: args.decision ?? undefined,
+    redaction: args.redaction ?? undefined,
+    memoryMatches: args.memoryMatches ?? undefined,
+    plan: args.plan ?? undefined,
+    goalsV2Enabled: isGoalsV2Enabled(),
+  });
 
-  const { data, error } = await supabase
-    .from("entries")
-    .insert({
-      user_id: userId,
-      type: args.entryType,
-      content: trimmedContent,
-      metadata,
-      ai_intent: args.intent.id,
-      ai_confidence: args.intent.confidence,
-      ai_meta: aiMeta,
-      source: SOURCE_TAG,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  const savedEntry = data as ClassifiedEntry;
-
-  if (isGoalsV2Enabled()) {
-    supabase.functions
-      .invoke("link_reflections", {
-        body: { entry_id: savedEntry.id },
-      })
-      .catch((invokeError) => {
-        console.warn("[createEntryFromChat] link_reflections invoke failed", invokeError);
-      });
-  }
-
-  if (args.entryType === "journal") {
-    let summaryResult: Awaited<ReturnType<typeof summarizeEntry>> | null = null;
-
-    try {
-      summaryResult = await summarizeEntry(trimmedContent, "journal");
-      const summaryPayload: CreateEntrySummaryParams = {
-        entry_id: savedEntry.id,
-        summary: summaryResult.summary,
-      };
-      if (summaryResult.emotion) {
-        summaryPayload.emotion = summaryResult.emotion;
-      }
-      if (Array.isArray(summaryResult.topics) && summaryResult.topics.length > 0) {
-        summaryPayload.topics = summaryResult.topics;
-      }
-      if (Array.isArray(summaryResult.people) && summaryResult.people.length > 0) {
-        summaryPayload.people = summaryResult.people;
-      }
-      if (typeof summaryResult.urgency_level === "number") {
-        summaryPayload.urgency_level = summaryResult.urgency_level;
-      }
-      if (summaryResult.suggested_action) {
-        summaryPayload.suggested_action = summaryResult.suggested_action;
-      }
-      if (summaryResult.blockers) {
-        summaryPayload.blockers = summaryResult.blockers;
-      }
-      if (
-        Array.isArray(summaryResult.dates_mentioned) &&
-        summaryResult.dates_mentioned.length > 0
-      ) {
-        summaryPayload.dates_mentioned = summaryResult.dates_mentioned;
-      }
-
-      await storeEntrySummary(summaryPayload);
-    } catch (summaryError) {
-      console.warn("[entries] summarizeEntry failed", summaryError);
-    }
-
-    try {
-      await embedEntry(savedEntry.id, trimmedContent);
-    } catch (embeddingError) {
-      console.warn("[entries] embedEntry failed", embeddingError);
-    }
-
-    if (summaryResult) {
-      const importance = Math.min(
-        10,
-        Math.max(1, Math.round((summaryResult.urgency_level ?? 0) * 1.2))
-      );
-      const shouldCapture = (summaryResult.urgency_level ?? 0) >= 8;
-      if (shouldCapture) {
-        try {
-          const moment = await createAtomicMoment({
-            entryId: savedEntry.id,
-            content: summaryResult.summary,
-            tags: summaryResult.topics ?? [],
-            importanceScore: importance,
-            metadata: {
-              autoGenerated: true,
-              suggested_action: summaryResult.suggested_action ?? null,
-            },
-          });
-
-          const existingMoments = Array.isArray(savedEntry.linked_moments)
-            ? savedEntry.linked_moments
-            : [];
-
-          await updateJournalEntry(savedEntry.id, {
-            linked_moments: [...existingMoments, moment.id],
-          });
-          savedEntry.linked_moments = [...existingMoments, moment.id];
-        } catch (momentError) {
-          console.warn("[entries] auto atomic moment failed", momentError);
-        }
-      }
-    }
-  }
-
-  return savedEntry;
+  return entry;
 }
 
 /**

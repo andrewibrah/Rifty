@@ -1,0 +1,328 @@
+// @ts-nocheck
+/// <reference lib="deno.ns" />
+/**
+ * create_entry_from_chat - Creates an entry with AI processing (summary, embedding, atomic moment)
+ */
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.1";
+import { corsHeaders, jsonResponse, requireEnv } from "../_shared/config.ts";
+import { generateEmbedding } from "../_shared/embedding.ts";
+
+const SUPABASE_URL = requireEnv("PROJECT_URL");
+const SUPABASE_SERVICE_ROLE_KEY = requireEnv("SERVICE_ROLE_KEY");
+const OPENAI_API_KEY = requireEnv("OPENAI_API_KEY");
+
+const supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false },
+});
+
+const SOURCE_TAG = "ai";
+
+const nowIso = () => new Date().toISOString();
+
+const summarizeEntry = async (
+  content: string,
+  entryType: string
+): Promise<Record<string, any>> => {
+  if (!OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is not configured");
+  }
+
+  const systemPrompt = `You are Riflett, a reflective coach. Analyze the user's entry and provide:
+1. A 2-3 line summary (no fluff)
+2. Core emotion (single word or phrase)
+3. Topic tags (max 5, lowercase)
+4. People mentioned (names only)
+5. Urgency level (0-10)
+6. One suggested next action
+7. Any blockers mentioned
+8. Dates/deadlines mentioned
+9. A brief reflection (1-2 sentences, warm and constructive)
+
+Entry type: ${entryType}`;
+
+  const tools = [
+    {
+      type: "function",
+      function: {
+        name: "emit_summary",
+        description: "Return structured summary and reflection for the entry",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          required: ["summary", "reflection"],
+          properties: {
+            summary: { type: "string" },
+            emotion: { type: "string" },
+            topics: { type: "array", items: { type: "string" } },
+            people: { type: "array", items: { type: "string" } },
+            urgency_level: { type: "number", minimum: 0, maximum: 10 },
+            suggested_action: { type: "string" },
+            blockers: { type: "string" },
+            dates_mentioned: { type: "array", items: { type: "string" } },
+            reflection: { type: "string" },
+          },
+        },
+      },
+    },
+  ] as const;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      temperature: 0.7,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content },
+      ],
+      tools,
+      tool_choice: { type: "function", function: { name: "emit_summary" } },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    console.warn("[create_entry_from_chat] summarizeEntry error", errorBody);
+    throw new Error("Failed to summarize entry");
+  }
+
+  const data = await response.json();
+  const msg = data?.choices?.[0]?.message;
+  const toolCall = msg?.tool_calls?.[0];
+  const argStr: string | undefined = toolCall?.function?.arguments;
+
+  if (!argStr) {
+    throw new Error("OpenAI response missing tool call arguments");
+  }
+
+  return JSON.parse(argStr);
+};
+
+const storeEntrySummary = async (
+  entryId: string,
+  userId: string,
+  summary: Record<string, any>
+) => {
+  await supabaseClient.from("entry_summaries").insert({
+    entry_id: entryId,
+    user_id: userId,
+    summary: summary.summary ?? null,
+    emotion: summary.emotion ?? null,
+    topics: Array.isArray(summary.topics) ? summary.topics : [],
+    people: Array.isArray(summary.people) ? summary.people : [],
+    urgency_level:
+      typeof summary.urgency_level === "number" ? summary.urgency_level : null,
+    suggested_action: summary.suggested_action ?? null,
+    blockers: summary.blockers ?? null,
+    dates_mentioned: Array.isArray(summary.dates_mentioned)
+      ? summary.dates_mentioned
+      : null,
+  });
+};
+
+const storeEntryEmbedding = async (
+  entryId: string,
+  userId: string,
+  content: string
+) => {
+  const embedding = await generateEmbedding(content);
+  await supabaseClient.from("entry_embeddings").insert({
+    entry_id: entryId,
+    user_id: userId,
+    embedding,
+    model: "text-embedding-3-small",
+  });
+};
+
+const createAtomicMoment = async (
+  userId: string,
+  entryId: string,
+  summary: Record<string, any>,
+  existingLinkedMoments: string[] | null | undefined
+) => {
+  const { data, error } = await supabaseClient
+    .from("atomic_moments")
+    .insert({
+      user_id: userId,
+      entry_id: entryId,
+      content: summary.summary ?? "",
+      tags: Array.isArray(summary.topics) ? summary.topics : [],
+      importance_score: Math.min(
+        10,
+        Math.max(1, Math.round((summary.urgency_level ?? 0) * 1.2))
+      ),
+      metadata: {
+        autoGenerated: true,
+        suggested_action: summary.suggested_action ?? null,
+      },
+    })
+    .select()
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  const newMomentId = data?.id;
+  if (!newMomentId) {
+    return;
+  }
+
+  const linkedMoments = Array.isArray(existingLinkedMoments)
+    ? [...existingLinkedMoments, newMomentId]
+    : [newMomentId];
+
+  await supabaseClient
+    .from("entries")
+    .update({ linked_moments: linkedMoments })
+    .eq("id", entryId);
+};
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  if (req.method !== "POST") {
+    return jsonResponse(405, { error: "Method not allowed" });
+  }
+
+  try {
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return jsonResponse(401, { error: "Missing authorization" });
+    }
+
+    const accessToken = authHeader.slice(7);
+    const { data: userResult, error: userError } =
+      await supabaseClient.auth.getUser(accessToken);
+
+    if (userError || !userResult?.user) {
+      return jsonResponse(401, { error: "Unauthorized" });
+    }
+
+    const userId = userResult.user.id;
+
+    const payload = await req.json();
+    const content =
+      typeof payload?.content === "string" ? payload.content.trim() : "";
+
+    if (!content) {
+      return jsonResponse(400, { error: "Content is required" });
+    }
+
+    const entryType =
+      typeof payload?.entryType === "string" ? payload.entryType : "journal";
+
+    const metadata = {
+      subsystem: payload?.intent?.subsystem ?? null,
+      searchTag: payload?.note?.searchTag ?? null,
+      noteDraft: payload?.note ?? null,
+      nativeIntent: payload?.nativeIntent ?? null,
+      routing: payload?.decision ?? null,
+      slots: payload?.enriched?.intent?.slots ?? {},
+      memoryMatches: payload?.memoryMatches ?? [],
+      redaction: payload?.redaction?.replacementMap ?? {},
+      plan: payload?.plan ?? null,
+    };
+
+    const aiMeta = {
+      intent: payload?.intent ?? null,
+      note: payload?.note ?? null,
+      processingTimeline: Array.isArray(payload?.processingTimeline)
+        ? payload.processingTimeline
+        : [],
+      nativeIntent: payload?.nativeIntent ?? null,
+      routing: payload?.decision ?? null,
+      enriched: payload?.enriched ?? null,
+      memoryMatches: payload?.memoryMatches ?? [],
+      redaction: payload?.redaction?.replacementMap ?? {},
+      plan: payload?.plan ?? null,
+    };
+
+    const { data: insertedEntry, error: insertError } = await supabaseClient
+      .from("entries")
+      .insert({
+        user_id: userId,
+        type: entryType,
+        content,
+        metadata,
+        ai_intent: payload?.intent?.id ?? null,
+        ai_confidence: payload?.intent?.confidence ?? null,
+        ai_meta: aiMeta,
+        source: SOURCE_TAG,
+      })
+      .select()
+      .single();
+
+    if (insertError || !insertedEntry) {
+      throw insertError ?? new Error("Failed to insert entry");
+    }
+
+    if (payload?.goalsV2Enabled) {
+      supabaseClient.functions
+        .invoke("link_reflections", {
+          body: { entry_id: insertedEntry.id },
+        })
+        .catch((invokeError) => {
+          console.warn(
+            "[create_entry_from_chat] link_reflections failed",
+            invokeError
+          );
+        });
+    }
+
+    let summaryResult: Record<string, any> | null = null;
+
+    if (entryType === "journal") {
+      try {
+        summaryResult = await summarizeEntry(content, entryType);
+        await storeEntrySummary(insertedEntry.id, userId, summaryResult);
+      } catch (summaryError) {
+        console.warn(
+          "[create_entry_from_chat] summarizeEntry failed",
+          summaryError
+        );
+      }
+
+      try {
+        await storeEntryEmbedding(insertedEntry.id, userId, content);
+      } catch (embeddingError) {
+        console.warn(
+          "[create_entry_from_chat] storeEntryEmbedding failed",
+          embeddingError
+        );
+      }
+
+      const urgency = Number(summaryResult?.urgency_level ?? 0);
+      if (urgency >= 8) {
+        try {
+          await createAtomicMoment(
+            userId,
+            insertedEntry.id,
+            summaryResult ?? {},
+            insertedEntry.linked_moments
+          );
+        } catch (momentError) {
+          console.warn(
+            "[create_entry_from_chat] createAtomicMoment failed",
+            momentError
+          );
+        }
+      }
+    }
+
+    return jsonResponse(200, { entry: insertedEntry });
+  } catch (error: any) {
+    console.error("[create_entry_from_chat] error", error);
+    return jsonResponse(500, {
+      error: "Internal server error",
+      message: error?.message ?? "Unknown error",
+    });
+  }
+});

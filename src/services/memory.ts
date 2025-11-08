@@ -1,774 +1,311 @@
 // @ts-nocheck
-import { supabase } from '../lib/supabase'
-import { debugIfTableMissing } from '../utils/supabaseErrors'
-import { generateEmbedding } from './embeddings'
-import { getJournalEntryById, type RemoteJournalEntry } from './data'
-import { getEntrySummary } from './summarization'
-import type { UserFact, CreateUserFactParams, AnalystQueryResult } from '../types/mvp'
-import type { ReflectionCadence } from '../types/personalization'
-import Constants from 'expo-constants'
+import { supabase } from "../lib/supabase";
+import { debugIfTableMissing } from "../utils/supabaseErrors";
+import type {
+  UserFact,
+  CreateUserFactParams,
+  AnalystQueryResult,
+} from "../types/mvp";
+import type { ReflectionCadence } from "../types/personalization";
+import {
+  getOperatingPicture as invokeOperatingPicture,
+  ragSearch as invokeRagSearch,
+  askAnalyst,
+  persistUserFactsEdge,
+} from "./edgeFunctions";
 
-const MODEL_NAME = 'gpt-4o-mini' as const
+type RagKind = "entry" | "goal" | "schedule";
 
-const RAG_ENTRY_THRESHOLD = 0.45
-const RAG_GOAL_THRESHOLD = 0.4
-const RAG_MAX_RESULTS = 9
-const RAG_MATCH_COUNT = 18
+type RagScopeInput = RagKind | RagKind[] | "all";
 
-type RagKind = 'entry' | 'goal' | 'schedule'
+type SafeQueryResult<T> = {
+  data: T | null;
+  error: unknown | null;
+};
+
+type QueryExecutor<T> =
+  | (() => Promise<
+      SafeQueryResult<T> | { data: T | null; error: unknown | null }
+    >)
+  | PromiseLike<SafeQueryResult<T> | { data: T | null; error: unknown | null }>;
 
 export interface OperatingGoal {
-  id: string
-  title: string
-  status: string
-  priority_score: number
-  target_date: string | null
-  current_step: string | null
-  micro_steps: string[]
-  metadata: Record<string, unknown>
-  updated_at: string
+  id: string;
+  title: string;
+  status: string;
+  priority_score: number;
+  target_date: string | null;
+  current_step: string | null;
+  micro_steps: string[];
+  metadata: Record<string, unknown>;
+  updated_at: string;
 }
 
 export interface OperatingEntry {
-  id: string
-  type: string
-  summary: string
-  created_at: string
-  emotion?: string | null
-  urgency_level?: number | null
-  snippet: string
-  metadata: Record<string, unknown>
+  id: string;
+  type: string;
+  summary: string;
+  created_at: string;
+  emotion?: string | null;
+  urgency_level?: number | null;
+  snippet: string;
+  metadata: Record<string, unknown>;
 }
 
 export interface OperatingSchedule {
-  id: string
-  intent: string | null
-  summary: string | null
-  start_at: string
-  end_at: string
-  goal_id: string | null
-  location: string | null
-  attendees: string[]
-  receipts: Record<string, unknown>
+  id: string;
+  intent: string | null;
+  summary: string | null;
+  start_at: string;
+  end_at: string;
+  goal_id: string | null;
+  location: string | null;
+  attendees: string[];
+  receipts: Record<string, unknown>;
 }
 
 export interface CadenceProfile {
-  cadence: ReflectionCadence
-  session_length_minutes: number
-  last_message_at: string | null
-  missed_day_count: number
-  current_streak: number
-  timezone: string
+  cadence: ReflectionCadence;
+  session_length_minutes: number;
+  last_message_at: string | null;
+  missed_day_count: number;
+  current_streak: number;
+  timezone: string;
 }
 
 export interface OperatingPicture {
-  why_model: Record<string, unknown> | null
-  top_goals: OperatingGoal[]
-  hot_entries: OperatingEntry[]
-  next_72h: OperatingSchedule[]
-  cadence_profile: CadenceProfile
-  risk_flags: string[]
+  why_model: Record<string, unknown> | null;
+  top_goals: OperatingGoal[];
+  hot_entries: OperatingEntry[];
+  next_72h: OperatingSchedule[];
+  cadence_profile: CadenceProfile;
+  risk_flags: string[];
 }
 
 export interface RagResult {
-  id: string
-  kind: RagKind
-  score: number
-  title?: string
-  snippet: string
-  metadata: Record<string, unknown>
+  id: string;
+  kind: RagKind;
+  score: number;
+  title?: string;
+  snippet: string;
+  metadata: Record<string, unknown>;
 }
 
 export interface PersistedFactInput {
-  key: string
-  value: unknown
-  confidence?: number
-  tags?: string[]
-  source?: string
+  key: string;
+  value: unknown;
+  confidence?: number;
+  tags?: string[];
+  source?: string;
 }
 
-interface EntryMatch {
-  entry_id: string
-  similarity: number
-}
-
-interface GoalMatch {
-  goal_id: string
-  similarity: number
-  title?: string | null
-  status?: string | null
-}
-type SafeQueryResult<T> = {
-  data: T | null
-  error: unknown | null
-}
-
-type FeatureRow = {
-  key: string | null
-  value_json: unknown
-}
-
-type GoalPriorityRow = {
-  goal_id: string | null
-  priority_score: number | null
-  goals?: {
-    id: string | number
-    title?: string | null
-    status?: string | null
-    current_step?: string | null
-    micro_steps?: unknown
-    metadata?: unknown
-    updated_at?: string | null
-    target_date?: string | null
-  } | null
-}
-
-type EntrySummaryRow = {
-  entry_id: string
-  summary: string | null
-  emotion: string | null
-  urgency_level: number | null
-  entries?: {
-    id: string | number
-    type?: string | null
-    content?: string | null
-    metadata?: unknown
-    created_at?: string | null
-  } | null
-}
-
-type ScheduleBlockRow = {
-  id: string | number
-  intent: string | null
-  summary: string | null
-  start_at: string | null
-  end_at: string | null
-  goal_id: string | null
-  location: string | null
-  attendees: unknown
-  receipts: unknown
-}
-
-type UserSettingsRow = {
-  cadence: string | null
-  session_length_minutes: number | null
-}
-
-type ProfileRow = {
-  timezone?: string | null
-  missed_day_count?: number | null
-  current_streak?: number | null
-  last_message_at?: string | null
-}
-
-type QueryExecutor<T> =
-  | (() => Promise<SafeQueryResult<T> | { data: T | null; error: unknown | null }>)
-  | PromiseLike<SafeQueryResult<T> | { data: T | null; error: unknown | null }>
-
-const safeQuery = async <T>(executor: QueryExecutor<T>): Promise<SafeQueryResult<T>> => {
+const safeQuery = async <T>(
+  executor: QueryExecutor<T>
+): Promise<SafeQueryResult<T>> => {
   try {
-    const result = typeof executor === 'function' ? await executor() : await executor
-    const data = (result?.data ?? null) as T | null
-    const error = result?.error ?? null
-    return { data, error }
+    const result =
+      typeof executor === "function" ? await executor() : await executor;
+    const data = (result?.data ?? null) as T | null;
+    const error = result?.error ?? null;
+    return { data, error };
   } catch (error) {
-    return { data: null, error }
+    return { data: null, error };
   }
-}
+};
 
-const CADENCE_VALUES: ReflectionCadence[] = ['none', 'daily', 'weekly']
-const isReflectionCadence = (value: unknown): value is ReflectionCadence =>
-  typeof value === 'string' && CADENCE_VALUES.includes(value as ReflectionCadence)
-
-
-const getOpenAIKey = (): string => {
-  const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, any>
-  const apiKey =
-    extra?.openaiApiKey ||
-    extra?.EXPO_PUBLIC_OPENAI_API_KEY ||
-    extra?.OPENAI_API_KEY
-
-  if (!apiKey) {
-    throw new Error('OpenAI API key is missing')
-  }
-  return apiKey
-}
-
-const nowIso = () => new Date().toISOString()
+const nowIso = () => new Date().toISOString();
 
 const resolveUserId = async (uid?: string): Promise<string | null> => {
-  if (uid) return uid
+  if (uid) return uid;
   const {
     data: { user },
     error,
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser();
   if (error) {
-    console.warn('[memory] resolveUserId failed', error)
-    return null
+    console.warn("[memory] resolveUserId failed", error);
+    return null;
   }
-  return user?.id ?? null
-}
+  return user?.id ?? null;
+};
 
-const normalizeStringArray = (value: unknown): string[] => {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => (typeof item === 'string' ? item : null))
-      .filter((item): item is string => item !== null)
-  }
-  return []
-}
+const asStringArray = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item : null))
+    .filter((item): item is string => item !== null);
+};
 
-const normalizeMetadata = (value: unknown): Record<string, unknown> => {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, unknown>
-  }
-  return {}
-}
+const asMetadata = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 
-const computeTokenScore = (query: string, text: string): number => {
-  const trimmedQuery = query.trim().toLowerCase()
-  const trimmedText = text.trim().toLowerCase()
-  if (!trimmedQuery || !trimmedText) return 0
-  const queryTokens = trimmedQuery.split(/[^a-z0-9]+/i).filter(Boolean)
-  const textTokens = trimmedText.split(/[^a-z0-9]+/i).filter(Boolean)
-  if (!queryTokens.length || !textTokens.length) return 0
-  const querySet = new Set(queryTokens)
-  let overlap = 0
-  for (const token of textTokens) {
-    if (querySet.has(token)) {
-      overlap += 1
-    }
-  }
-  return overlap / querySet.size
-}
+const mapOperatingGoals = (rows: unknown[]): OperatingGoal[] =>
+  rows
+    .map((raw) => {
+      if (!raw || typeof raw !== "object") return null;
+      const goal = raw as Record<string, unknown>;
+      return {
+        id: String(goal.id ?? ""),
+        title: String(goal.title ?? "Untitled goal"),
+        status: String(goal.status ?? "active"),
+        priority_score: Number(goal.priority_score ?? 0),
+        target_date:
+          typeof goal.target_date === "string" ? goal.target_date : null,
+        current_step:
+          typeof goal.current_step === "string" ? goal.current_step : null,
+        micro_steps: asStringArray(goal.micro_steps),
+        metadata: asMetadata(goal.metadata),
+        updated_at: String(goal.updated_at ?? nowIso()),
+      };
+    })
+    .filter((goal): goal is OperatingGoal => Boolean(goal?.id));
+
+const mapOperatingEntries = (rows: unknown[]): OperatingEntry[] =>
+  rows
+    .map((raw) => {
+      if (!raw || typeof raw !== "object") return null;
+      const entry = raw as Record<string, unknown>;
+      const content = typeof entry.content === "string" ? entry.content : "";
+      const snippet = content.slice(0, 220);
+      return {
+        id: String(entry.id ?? ""),
+        type: String(entry.type ?? "journal"),
+        summary: typeof entry.summary === "string" ? entry.summary : snippet,
+        created_at: String(entry.created_at ?? nowIso()),
+        emotion: typeof entry.emotion === "string" ? entry.emotion : null,
+        urgency_level:
+          typeof entry.urgency_level === "number" ? entry.urgency_level : null,
+        snippet,
+        metadata: asMetadata(entry.metadata),
+      };
+    })
+    .filter((entry): entry is OperatingEntry => Boolean(entry?.id));
+
+type RawSchedule = {
+  id?: unknown;
+  intent?: unknown;
+  summary?: unknown;
+  start_at?: unknown;
+  end_at?: unknown;
+  goal_id?: unknown;
+  location?: unknown;
+  attendees?: unknown;
+  receipts?: unknown;
+};
+
+const mapOperatingSchedules = (rows: unknown[]): OperatingSchedule[] =>
+  rows
+    .map((raw) => {
+      const rowData = raw as RawSchedule;
+      const attendees = Array.isArray(rowData.attendees)
+        ? rowData.attendees.filter(
+            (item): item is string => typeof item === "string"
+          )
+        : [];
+      return {
+        id: String(rowData.id ?? ""),
+        intent: typeof rowData.intent === "string" ? rowData.intent : null,
+        summary: typeof rowData.summary === "string" ? rowData.summary : null,
+        start_at: String(rowData.start_at ?? nowIso()),
+        end_at: String(rowData.end_at ?? rowData.start_at ?? nowIso()),
+        goal_id: typeof rowData.goal_id === "string" ? rowData.goal_id : null,
+        location:
+          typeof rowData.location === "string" ? rowData.location : null,
+        attendees,
+        receipts: asMetadata(rowData.receipts),
+      };
+    })
+    .filter((row): row is OperatingSchedule => Boolean(row?.id));
 
 export async function getOperatingPicture(
   uid?: string
 ): Promise<OperatingPicture> {
-  const userId = await resolveUserId(uid)
+  const userId = await resolveUserId(uid);
   if (!userId) {
-    throw new Error('User not authenticated')
+    throw new Error("User not authenticated");
   }
 
-  const now = new Date()
-  const future = new Date(now.getTime() + 72 * 60 * 60 * 1000)
+  const payload = await invokeOperatingPicture();
+  const cadenceRaw = (payload?.cadence_profile ?? {}) as Record<
+    string,
+    unknown
+  >;
 
-  const [
-    featureRes,
-    goalsRes,
-    entryRes,
-    scheduleRes,
-    settingsRes,
-    profileRes,
-  ] = await Promise.all([
-    safeQuery<FeatureRow[]>(async () => {
-      const { data, error } = await supabase
-        .from('features')
-        .select('key, value_json')
-        .eq('user_id', userId)
-        .in('key', ['why_model', 'risk_flags', 'cadence_profile'])
-      return { data, error }
-    }),
-    safeQuery<GoalPriorityRow[]>(async () => {
-      const { data, error } = await supabase
-        .from('mv_goal_priority')
-        .select(
-          `goal_id, priority_score, goals!inner(
-            id,
-            title,
-            status,
-            current_step,
-            micro_steps,
-            metadata,
-            updated_at,
-            target_date
-          )`
-        )
-        .eq('user_id', userId)
-        .order('priority_score', { ascending: false })
-        .limit(3)
-      return { data, error }
-    }),
-    safeQuery<EntrySummaryRow[]>(async () => {
-      const { data, error } = await supabase
-        .from('entry_summaries')
-        .select(
-          `entry_id,
-           summary,
-           emotion,
-           urgency_level,
-           entries!inner(id, type, content, metadata, created_at)`
-        )
-        .eq('user_id', userId)
-        .order('urgency_level', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(6)
-      return { data, error }
-    }),
-    safeQuery<ScheduleBlockRow[]>(async () => {
-      const { data, error } = await supabase
-        .from('schedule_blocks')
-        .select(
-          'id, intent, summary, start_at, end_at, goal_id, location, attendees, receipts'
-        )
-        .eq('user_id', userId)
-        .gte('start_at', now.toISOString())
-        .lte('start_at', future.toISOString())
-        .order('start_at', { ascending: true })
-        .limit(6)
-      return { data, error }
-    }),
-    safeQuery<UserSettingsRow>(async () => {
-      const { data, error } = await supabase
-        .from('user_settings')
-        .select('cadence, session_length_minutes')
-        .eq('user_id', userId)
-        .maybeSingle()
-      return { data, error }
-    }),
-    safeQuery<ProfileRow>(async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('timezone, missed_day_count, current_streak, last_message_at')
-        .eq('id', userId)
-        .maybeSingle()
-      return { data, error }
-    }),
-  ])
-
-  const handleResultError = (label: string, error: unknown) => {
-    if (!error) return;
-    if (debugIfTableMissing(`[memory] ${label}`, error)) {
-      return;
-    }
-    console.warn(`[memory] ${label}`, error);
+  const cadence: CadenceProfile = {
+    cadence: (typeof cadenceRaw.cadence === "string"
+      ? cadenceRaw.cadence
+      : "none") as ReflectionCadence,
+    session_length_minutes:
+      Number(cadenceRaw.session_length_minutes ?? 25) || 25,
+    last_message_at:
+      typeof cadenceRaw.last_message_at === "string"
+        ? cadenceRaw.last_message_at
+        : null,
+    missed_day_count: Number(cadenceRaw.missed_day_count ?? 0) || 0,
+    current_streak: Number(cadenceRaw.current_streak ?? 0) || 0,
+    timezone:
+      typeof cadenceRaw.timezone === "string" ? cadenceRaw.timezone : "UTC",
   };
 
-  handleResultError('feature fetch failed', featureRes.error);
-  handleResultError('goal snapshot fetch failed', goalsRes.error);
-  handleResultError('entry snapshot fetch failed', entryRes.error);
-  handleResultError('schedule snapshot fetch failed', scheduleRes.error);
-  handleResultError('cadence settings fetch failed', settingsRes.error);
-  handleResultError('profile snapshot fetch failed', profileRes.error);
+  const riskFlags = Array.isArray(payload?.risk_flags)
+    ? payload.risk_flags.filter(
+        (flag): flag is string => typeof flag === "string"
+      )
+    : [];
 
-  const featureMap = (featureRes.data ?? []).reduce<Record<string, unknown>>(
-    (acc, row) => {
-      if (row?.key) {
-        acc[row.key] = row.value_json ?? {}
-      }
-      return acc
-    },
-    {}
-  )
+  const goals = Array.isArray(payload?.top_goals)
+    ? mapOperatingGoals(payload.top_goals)
+    : [];
 
-  const whyModel =
-    featureMap.why_model && typeof featureMap.why_model === 'object'
-      ? (featureMap.why_model as Record<string, unknown>)
-      : null
+  const entries = Array.isArray(payload?.hot_entries)
+    ? mapOperatingEntries(payload.hot_entries)
+    : [];
 
-  const cadenceOverride =
-    featureMap.cadence_profile && typeof featureMap.cadence_profile === 'object'
-      ? (featureMap.cadence_profile as Record<string, unknown>)
-      : null
-
-  const riskFlags = normalizeStringArray(featureMap.risk_flags)
-
-  const topGoals: OperatingGoal[] = (goalsRes.data ?? [])
-    .map((row) => {
-      const goal = (row as Record<string, any>).goals as Record<string, any> | undefined
-      if (!goal) return null
-      return {
-        id: String(goal.id),
-        title: String(goal.title ?? 'Untitled goal'),
-        status: String(goal.status ?? 'active'),
-        priority_score: Number(row.priority_score ?? 0),
-        target_date: goal.target_date ?? null,
-        current_step: goal.current_step ?? null,
-        micro_steps: normalizeStringArray(goal.micro_steps),
-        metadata: normalizeMetadata(goal.metadata),
-        updated_at: goal.updated_at ?? nowIso(),
-      }
-    })
-    .filter((goal): goal is OperatingGoal => goal !== null)
-
-  const hotEntries: OperatingEntry[] = (entryRes.data ?? [])
-    .map((row) => {
-      const entry = (row as Record<string, any>).entries as Record<string, any> | undefined
-      if (!entry) return null
-      const content = typeof entry.content === 'string' ? entry.content : ''
-      const snippet = content.slice(0, 220)
-      const operatingEntry: OperatingEntry = {
-        id: String(entry.id),
-        type: String(entry.type ?? 'journal'),
-        summary: typeof row.summary === 'string' ? row.summary : snippet,
-        created_at: String(entry.created_at ?? nowIso()),
-        emotion: typeof row.emotion === 'string' ? row.emotion : null,
-        urgency_level:
-          typeof row.urgency_level === 'number' ? row.urgency_level : null,
-        snippet,
-        metadata: normalizeMetadata(entry.metadata),
-      }
-      return operatingEntry
-    })
-    .filter((entry): entry is OperatingEntry => entry !== null)
-    .slice(0, 3)
-
-  const nextBlocks: OperatingSchedule[] = (scheduleRes.data ?? [])
-    .map((row) => ({
-      id: String(row.id),
-      intent: row.intent ?? null,
-      summary: row.summary ?? null,
-      start_at: row.start_at ?? nowIso(),
-      end_at: row.end_at ?? row.start_at ?? nowIso(),
-      goal_id: row.goal_id ?? null,
-      location: row.location ?? null,
-      attendees: Array.isArray(row.attendees)
-        ? (row.attendees as string[])
-        : [],
-      receipts: normalizeMetadata(row.receipts),
-    }))
-    .slice(0, 5)
-
-  const cadenceValue =
-    cadenceOverride?.cadence && isReflectionCadence(cadenceOverride.cadence)
-      ? cadenceOverride.cadence
-      : settingsRes.data?.cadence && isReflectionCadence(settingsRes.data.cadence)
-      ? settingsRes.data.cadence
-      : 'none'
-
-  const sessionLength =
-    Number(settingsRes.data?.session_length_minutes ?? cadenceOverride?.session_length_minutes ?? 25) || 25
-
-  const profile = (profileRes.data ?? null) as
-    | {
-        timezone?: string | null
-        missed_day_count?: number | null
-        current_streak?: number | null
-        last_message_at?: string | null
-      }
-    | null
-  const cadenceProfile: CadenceProfile = {
-    cadence: cadenceValue,
-    session_length_minutes: sessionLength,
-    last_message_at: profile?.last_message_at ?? null,
-    missed_day_count: Number(profile?.missed_day_count ?? 0),
-    current_streak: Number(profile?.current_streak ?? 0),
-    timezone:
-      profile?.timezone && typeof profile.timezone === 'string'
-        ? profile.timezone
-        : 'UTC',
-  }
+  const schedules = Array.isArray(payload?.next_72h)
+    ? mapOperatingSchedules(payload.next_72h)
+    : [];
 
   return {
-    why_model: whyModel,
-    top_goals: topGoals,
-    hot_entries: hotEntries,
-    next_72h: nextBlocks,
-    cadence_profile: cadenceProfile,
+    why_model: (payload?.why_model ?? null) as Record<string, unknown> | null,
+    top_goals: goals,
+    hot_entries: entries,
+    next_72h: schedules,
+    cadence_profile: cadence,
     risk_flags: riskFlags,
-  }
-}
-
-type RagScopeInput = RagKind | RagKind[] | 'all'
-
-const scopeToKinds = (scope: RagScopeInput): RagKind[] => {
-  if (!scope || scope === 'all') {
-    return ['entry', 'goal', 'schedule']
-  }
-  if (Array.isArray(scope)) {
-    return Array.from(new Set(scope))
-      .filter((kind): kind is RagKind => kind === 'entry' || kind === 'goal' || kind === 'schedule')
-  }
-  if (scope === 'entry' || scope === 'goal' || scope === 'schedule') {
-    return [scope]
-  }
-  return ['entry', 'goal', 'schedule']
-}
-
-const mapEntryResults = (
-  matches: EntryMatch[] | null | undefined,
-  details: Record<string, any>,
-  query: string
-): RagResult[] => {
-  if (!Array.isArray(matches)) return []
-  return matches.reduce<RagResult[]>((acc, match) => {
-    const entry = details[match.entry_id]
-    if (!entry) return acc
-    const firstSummary = Array.isArray(entry.entry_summaries)
-      ? entry.entry_summaries[0]
-      : undefined
-    const summary =
-      typeof firstSummary?.summary === 'string'
-        ? firstSummary.summary
-        : ''
-    const snippetSource = summary || (typeof entry.content === 'string' ? entry.content : '')
-    const title = typeof entry.type === 'string' && entry.type
-      ? `${entry.type} entry`
-      : null
-
-    const result: RagResult = {
-      id: match.entry_id,
-      kind: 'entry',
-      score: 0.7 * Number(match.similarity ?? 0) + 0.3 * computeTokenScore(query, snippetSource),
-      snippet: snippetSource.slice(0, 220),
-      metadata: {
-        created_at: entry.created_at ?? null,
-        type: entry.type ?? null,
-        emotion: firstSummary?.emotion ?? null,
-        urgency_level: firstSummary?.urgency_level ?? null,
-      },
-    }
-    if (title) {
-      result.title = title
-    }
-    acc.push(result)
-    return acc
-  }, [])
-}
-
-const mapGoalResults = (
-  matches: GoalMatch[] | null | undefined,
-  details: Record<string, any>,
-  query: string
-): RagResult[] => {
-  if (!Array.isArray(matches)) return []
-  return matches.reduce<RagResult[]>((acc, match) => {
-    const goal = details[match.goal_id]
-    if (!goal) return acc
-    const snippetSource =
-      typeof goal.description === 'string'
-        ? goal.description
-        : goal.current_step
-        ? String(goal.current_step)
-        : Array.isArray(goal.micro_steps)
-        ? goal.micro_steps.join(' → ')
-        : String(goal.title ?? 'Goal')
-    const result: RagResult = {
-      id: match.goal_id,
-      kind: 'goal',
-      score: 0.7 * Number(match.similarity ?? 0) + 0.3 * computeTokenScore(query, snippetSource),
-      title: typeof goal.title === 'string' ? goal.title : match.title ?? 'Goal',
-      snippet: snippetSource.slice(0, 220),
-      metadata: {
-        status: goal.status ?? match.status ?? null,
-        current_step: goal.current_step ?? null,
-        micro_steps: goal.micro_steps ?? [],
-        updated_at: goal.updated_at ?? null,
-      },
-    }
-    acc.push(result)
-    return acc
-  }, [])
-}
-
-interface ScheduleRow {
-  id: string
-  intent?: string | null
-  summary?: string | null
-  start_at?: string | null
-  end_at?: string | null
-  goal_id?: string | null
-  location?: string | null
-  attendees?: string[] | null
-}
-
-const mapScheduleResults = (rows: ScheduleRow[], query: string): RagResult[] => {
-  if (!Array.isArray(rows) || !query) return []
-  return rows.reduce<RagResult[]>((acc, row) => {
-    const text = [row.summary, row.intent, row.location]
-      .filter((value): value is string => typeof value === 'string')
-      .join(' ')
-    const score = computeTokenScore(query, text)
-    if (score <= 0) {
-      return acc
-    }
-    const snippetSource =
-      typeof row.summary === 'string'
-        ? row.summary
-        : typeof row.intent === 'string'
-        ? row.intent
-        : 'Scheduled block'
-    const result: RagResult = {
-      id: String(row.id),
-      kind: 'schedule',
-      score,
-      title: typeof row.intent === 'string' ? row.intent : 'Schedule block',
-      snippet: snippetSource,
-      metadata: {
-        start_at: row.start_at ?? null,
-        end_at: row.end_at ?? null,
-        location: row.location ?? null,
-        attendees: Array.isArray(row.attendees) ? row.attendees : [],
-        goal_id: row.goal_id ?? null,
-      },
-    }
-    acc.push(result)
-    return acc
-  }, [])
+  };
 }
 
 export async function ragSearch(
   uid: string,
   query: string,
-  scope: RagScopeInput = 'all',
+  scope: RagScopeInput = "all",
   options: { limit?: number } = {}
 ): Promise<RagResult[]> {
-  const trimmed = query.trim()
-  if (!trimmed) return []
-
-  const userId = await resolveUserId(uid)
+  const userId = await resolveUserId(uid);
   if (!userId) {
-    throw new Error('User not authenticated')
+    throw new Error("User not authenticated");
   }
 
-  let queryEmbedding: number[]
-  try {
-    queryEmbedding = await generateEmbedding(trimmed)
-  } catch (error) {
-    console.warn('[memory] ragSearch embedding failed', error)
-    return []
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return [];
   }
 
-  const kinds = scopeToKinds(scope)
-  const limit = Math.max(1, Math.min(options.limit ?? 8, RAG_MAX_RESULTS))
+  const response = await invokeRagSearch({
+    query: trimmed,
+    scope,
+    limit: options.limit,
+  });
 
-  const results: RagResult[] = []
-
-  if (kinds.includes('entry')) {
-    const { data: entryMatchData, error: entryMatchError } = await supabase.rpc(
-      'match_entry_embeddings',
-      {
-        query_embedding: queryEmbedding,
-        match_user_id: userId,
-        match_threshold: RAG_ENTRY_THRESHOLD,
-        match_count: RAG_MATCH_COUNT,
-      }
-    )
-
-    if (entryMatchError) {
-      console.warn('[memory] entry match failed', entryMatchError)
-    } else {
-      const entryMatches = (entryMatchData ?? []) as EntryMatch[]
-      if (entryMatches.length) {
-        const entryIds = entryMatches
-          .map((match) => match.entry_id)
-          .filter((id): id is string => typeof id === 'string')
-
-        if (entryIds.length) {
-          const { data: entryDetails, error: entryDetailError } = await supabase
-            .from('entries')
-            .select(
-              'id, type, content, metadata, created_at, entry_summaries(summary, emotion, urgency_level)'
-            )
-            .in('id', entryIds)
-
-          if (entryDetailError) {
-            console.warn('[memory] entry detail fetch failed', entryDetailError)
-          } else {
-            const entryMap = (entryDetails ?? []).reduce<Record<string, any>>(
-              (acc, row) => {
-                const id = typeof row.id === 'string' ? row.id : null
-                if (id) {
-                  acc[id] = row
-                }
-                return acc
-              },
-              {}
-            )
-            results.push(...mapEntryResults(entryMatches, entryMap, trimmed))
-          }
-        }
-      }
-    }
-  }
-
-  if (kinds.includes('goal')) {
-    const { data: goalMatchData, error: goalMatchError } = await supabase.rpc(
-      'match_goal_embeddings',
-      {
-        query_embedding: queryEmbedding,
-        match_user_id: userId,
-        match_threshold: RAG_GOAL_THRESHOLD,
-        match_count: RAG_MATCH_COUNT,
-      }
-    )
-
-    if (goalMatchError) {
-      console.warn('[memory] goal match failed', goalMatchError)
-    } else {
-      const goalMatches = (goalMatchData ?? []) as GoalMatch[]
-      if (goalMatches.length) {
-        const goalIds = goalMatches
-          .map((match) => match.goal_id)
-          .filter((id): id is string => typeof id === 'string')
-
-        if (goalIds.length) {
-          const { data: goalDetails, error: goalDetailError } = await supabase
-            .from('goals')
-            .select(
-              'id, title, status, current_step, micro_steps, metadata, updated_at, description'
-            )
-            .in('id', goalIds)
-
-          if (goalDetailError) {
-            console.warn('[memory] goal detail fetch failed', goalDetailError)
-          } else {
-            const goalMap = (goalDetails ?? []).reduce<Record<string, any>>(
-              (acc, row) => {
-                const id = typeof row.id === 'string' ? row.id : null
-                if (id) {
-                  acc[id] = row
-                }
-                return acc
-              },
-              {}
-            )
-            results.push(...mapGoalResults(goalMatches, goalMap, trimmed))
-          }
-        }
-      }
-    }
-  }
-
-  if (kinds.includes('schedule')) {
-    const { data: scheduleRows, error: scheduleError } = await supabase
-      .from('schedule_blocks')
-      .select(
-        'id, intent, summary, start_at, end_at, goal_id, location, attendees'
-      )
-      .eq('user_id', userId)
-      .order('start_at', { ascending: true })
-      .limit(15)
-
-    if (scheduleError) {
-      console.warn('[memory] schedule search fetch failed', scheduleError)
-    } else {
-      const scheduleData = (scheduleRows ?? []) as ScheduleRow[]
-      results.push(...mapScheduleResults(scheduleData, trimmed))
-    }
-  }
-
-  const sorted = results.sort((a, b) => b.score - a.score)
-  const maxPerKind = Math.max(1, Math.ceil(limit / Math.max(1, kinds.length)))
-  const counts = new Map<RagKind, number>()
-  const deduped: RagResult[] = []
-
-  for (const item of sorted) {
-    if (deduped.find((existing) => existing.id === item.id)) {
-      continue
-    }
-    const currentCount = counts.get(item.kind) ?? 0
-    if (currentCount >= maxPerKind) {
-      continue
-    }
-    deduped.push(item)
-    counts.set(item.kind, currentCount + 1)
-    if (deduped.length >= limit) {
-      break
-    }
-  }
-
-  return deduped.slice(0, limit)
+  return (response?.results ?? []).map((item) => ({
+    id: String(item.id ?? ""),
+    kind: item.kind as RagKind,
+    score: Number(item.score ?? 0),
+    title: item.title,
+    snippet: String(item.snippet ?? ""),
+    metadata: item.metadata ?? {},
+  }));
 }
 
 export async function persistUserFacts(
@@ -776,341 +313,156 @@ export async function persistUserFacts(
   facts: PersistedFactInput[]
 ): Promise<void> {
   if (!Array.isArray(facts) || facts.length === 0) {
-    return
+    return;
   }
 
-  const userId = await resolveUserId(uid ?? undefined)
+  const userId = await resolveUserId(uid ?? undefined);
   if (!userId) {
-    throw new Error('User not authenticated')
+    throw new Error("User not authenticated");
   }
 
-  const rows = facts
-    .filter((fact) => fact && typeof fact.key === 'string' && fact.key.trim())
+  const normalizedFacts = facts
+    .filter((fact) => fact && typeof fact.key === "string" && fact.key.trim())
     .map((fact) => ({
-      user_id: userId,
-      key: fact.key.trim().startsWith('facts:')
-        ? fact.key.trim()
-        : `facts:${fact.key.trim()}`,
-      value_json: {
-        value: fact.value ?? null,
-        confidence: fact.confidence ?? null,
-        tags: Array.isArray(fact.tags) ? fact.tags : [],
-        source: fact.source ?? 'main.chat',
-        updated_at: nowIso(),
-      },
-      updated_at: nowIso(),
-    }))
+      key: fact.key.trim(),
+      value: fact.value ?? null,
+      confidence: fact.confidence,
+      tags: Array.isArray(fact.tags)
+        ? fact.tags.filter((tag): tag is string => typeof tag === "string")
+        : [],
+      source: typeof fact.source === "string" ? fact.source : undefined,
+    }));
 
-  if (!rows.length) {
-    return
+  if (!normalizedFacts.length) {
+    return;
   }
 
-  const { error } = await safeQuery(
-    supabase
-      .from('features')
-      .upsert(rows, { onConflict: 'user_id,key' })
-  )
-
-  if (error) {
-    if (debugIfTableMissing('[memory] persistUserFacts', error)) {
-      return;
-    }
-    console.error('[memory] persistUserFacts failed', error)
-    throw error
-  }
+  await persistUserFactsEdge({ facts: normalizedFacts, user_id: userId });
 }
 
-/**
- * Build context for RAG: fetch relevant entries + summaries + user facts
- */
-export async function buildRAGContext(
-  query: string,
-  options: { limit?: number; threshold?: number } = {}
-): Promise<{
-  entries: Array<{ entry: RemoteJournalEntry; summary: string; similarity: number }>
-  facts: UserFact[]
-}> {
-  const userId = await resolveUserId()
-  if (!userId) {
-    throw new Error('User not authenticated')
+export async function answerAnalystQuery(
+  query: string
+): Promise<AnalystQueryResult> {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    throw new Error("Query is required");
   }
-
-  const limit = options.limit ?? 5
-  const ragEntries = await ragSearch(userId, query, 'entry', { limit })
-
-  const entriesWithContext = await Promise.all(
-    ragEntries.map(async (item) => {
-      const entry = await getJournalEntryById(item.id)
-      const summary = await getEntrySummary(item.id)
-      if (!entry) return null
-      return {
-        entry,
-        summary: summary?.summary ?? item.snippet,
-        similarity: item.score,
-      }
-    })
-  )
-
-  const validEntries = entriesWithContext.filter(
-    (value): value is NonNullable<typeof value> => value !== null
-  )
-
-  const facts = await listUserFacts({ limit: 10 })
-
-  return { entries: validEntries, facts }
+  return askAnalyst({ query: trimmed });
 }
 
-/**
- * Answer an analyst query using RAG
- */
-export async function answerAnalystQuery(query: string): Promise<AnalystQueryResult> {
-  const apiKey = getOpenAIKey()
-  const ctrl = new AbortController()
-  const timeout = setTimeout(() => ctrl.abort(), 45000)
-
-  // Build context
-  const { entries, facts } = await buildRAGContext(query)
-
-  // Format context for prompt
-  const entryContext = entries
-    .map(
-      (e, idx) =>
-        `[${idx + 1}] ${new Date(e.entry.created_at).toLocaleDateString()} (${
-          e.entry.type
-        }):\n${e.summary}`
-    )
-    .join('\n\n')
-
-  const factsContext = facts.map((f) => `- ${f.fact}`).join('\n')
-
-  const systemPrompt = `You are Riflett, an analyst for the user's journal. Answer questions about their entries with:
-- Patterns and insights
-- Direct citations (reference entry dates)
-- Concise, actionable answers (fit on one screen)
-- Empathy and warmth
-
-Context will include relevant past entries and learned facts about the user.`
-
-  const userPrompt = `Question: ${query}
-
-Relevant Entries:
-${entryContext || 'No relevant entries found.'}
-
-Known Facts:
-${factsContext || 'No facts yet.'}
-
-Answer the question, citing specific entries by date.`
-
-  const tools = [
+export async function createUserFact(
+  params: CreateUserFactParams
+): Promise<UserFact> {
+  const { data, error } = await supabase.functions.invoke<UserFact>(
+    "create_user_fact",
     {
-      type: 'function',
-      function: {
-        name: 'emit_answer',
-        description: 'Return answer with citations',
-        parameters: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['answer'],
-          properties: {
-            answer: { type: 'string' },
-            citations: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  entry_id: { type: 'string' },
-                  date: { type: 'string' },
-                  snippet: { type: 'string' },
-                },
-              },
-            },
-            relevant_facts: { type: 'array', items: { type: 'string' } },
-          },
-        },
+      method: "POST",
+      body: {
+        fact: params.fact,
+        category: params.category,
+        confidence: params.confidence,
+        source_entry_ids: params.source_entry_ids,
       },
-    },
-  ] as const
-
-  const body = {
-    model: MODEL_NAME,
-    temperature: 0.7,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    tools,
-    tool_choice: { type: 'function', function: { name: 'emit_answer' } },
-  }
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    })
-
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => '')
-      console.warn('[OpenAI Analyst Query] Error:', response.status, errorBody)
-      throw new Error('Failed to answer query')
     }
-
-    const data = await response.json()
-    const msg = data?.choices?.[0]?.message
-    const toolCall = msg?.tool_calls?.[0]
-    const argStr: string | undefined = toolCall?.function?.arguments
-
-    if (!argStr) {
-      throw new Error('OpenAI response missing tool call')
-    }
-
-    const parsed = JSON.parse(argStr) as AnalystQueryResult
-    return parsed
-  } catch (error: any) {
-    if (error?.name === 'AbortError') {
-      throw new Error('Query request timed out')
-    }
-    console.error('[OpenAI Analyst Query] Error:', error)
-    throw error
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
-/**
- * Create a user fact
- */
-export async function createUserFact(params: CreateUserFactParams): Promise<UserFact> {
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-
-  if (authError || !user) {
-    throw new Error('User not authenticated')
-  }
-
-  const { data, error } = await supabase
-    .from('user_facts')
-    .insert({
-      user_id: user.id,
-      fact: params.fact,
-      category: params.category ?? null,
-      confidence: params.confidence ?? 0.8,
-      source_entry_ids: params.source_entry_ids ?? [],
-    })
-    .select()
-    .single()
+  );
 
   if (error) {
-    console.error('[createUserFact] Error:', error)
-    throw error
+    console.error("[createUserFact] Edge function error:", error);
+    throw error;
   }
 
-  return data as UserFact
+  if (!data) {
+    throw new Error("create_user_fact edge function returned no data");
+  }
+
+  return data;
 }
 
-/**
- * List user facts
- */
-export async function listUserFacts(options: {
-  limit?: number
-  category?: string
-} = {}): Promise<UserFact[]> {
+export async function listUserFacts(
+  options: { limit?: number; category?: string } = {}
+): Promise<UserFact[]> {
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    throw new Error('User not authenticated')
+    throw new Error("User not authenticated");
   }
 
-  const limit = options.limit ?? 50
+  const limit = options.limit ?? 50;
 
   let query = supabase
-    .from('user_facts')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
-    .limit(limit)
+    .from("user_facts")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(limit);
 
   if (options.category) {
-    query = query.eq('category', options.category)
+    query = query.eq("category", options.category);
   }
 
-  const { data, error } = await query
+  const { data, error } = await query;
 
   if (error) {
-    console.error('[listUserFacts] Error:', error)
-    throw error
+    console.error("[listUserFacts] Error:", error);
+    throw error;
   }
 
-  return (data ?? []) as UserFact[]
+  return (data ?? []) as UserFact[];
 }
 
-/**
- * Update a user fact
- */
 export async function updateUserFact(
   factId: string,
   updates: { fact?: string; confidence?: number; last_confirmed_at?: string }
 ): Promise<UserFact> {
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-
-  if (authError || !user) {
-    throw new Error('User not authenticated')
-  }
-
-  const { data, error } = await supabase
-    .from('user_facts')
-    .update(updates)
-    .eq('id', factId)
-    .eq('user_id', user.id)
-    .select()
-    .single()
+  const { data, error } = await supabase.functions.invoke<UserFact>(
+    "update_user_fact",
+    {
+      method: "POST",
+      body: {
+        fact_id: factId,
+        ...updates,
+      },
+    }
+  );
 
   if (error) {
-    console.error('[updateUserFact] Error:', error)
-    throw error
+    console.error("[updateUserFact] Edge function error:", error);
+    throw error;
   }
 
-  return data as UserFact
+  if (!data) {
+    throw new Error("update_user_fact edge function returned no data");
+  }
+
+  return data;
 }
 
-/**
- * Delete a user fact
- */
+interface DeleteUserFactResponse {
+  deleted_id: string;
+  deleted_at: string;
+}
+
 export async function deleteUserFact(factId: string): Promise<void> {
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-
-  if (authError || !user) {
-    throw new Error('User not authenticated')
-  }
-
-  const { error } = await safeQuery(
-    supabase
-      .from('user_facts')
-      .delete()
-      .eq('id', factId)
-      .eq('user_id', user.id)
-  )
+  const { data, error } =
+    await supabase.functions.invoke<DeleteUserFactResponse>(
+      "delete_user_fact",
+      {
+        method: "POST",
+        body: {
+          fact_id: factId,
+        },
+      }
+    );
 
   if (error) {
-    if (debugIfTableMissing('[deleteUserFact]', error)) {
-      return;
-    }
-    console.error('[deleteUserFact] Error:', error)
-    throw error
+    console.error("[deleteUserFact] Edge function error:", error);
+    throw error;
+  }
+
+  if (!data) {
+    throw new Error("delete_user_fact edge function returned no data");
   }
 }
