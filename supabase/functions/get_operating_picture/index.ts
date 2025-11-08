@@ -93,27 +93,15 @@ Deno.serve(async (req) => {
           return result;
         }),
 
-      // Top goals with priorities
+      // Top goals with priorities - query goals directly since mv might be empty
       supabaseClient
-        .from("mv_goal_priority")
+        .from("goals")
         .select(
-          `
-          goal_id,
-          priority_score,
-          goals!inner(
-            id,
-            title,
-            status,
-            current_step,
-            micro_steps,
-            metadata,
-            updated_at,
-            target_date
-          )
-        `
+          "id, title, status, current_step, micro_steps, metadata, updated_at, target_date"
         )
         .eq("user_id", user.id)
-        .order("priority_score", { ascending: false })
+        .eq("status", "active")
+        .order("updated_at", { ascending: false })
         .limit(3)
         .then((result) => {
           if (result.error) {
@@ -123,26 +111,28 @@ Deno.serve(async (req) => {
             );
             return { data: [], error: result.error };
           }
-          return result;
+          // Transform to match expected format
+          const transformed = {
+            data:
+              result.data?.map((goal) => ({
+                goal_id: goal.id,
+                priority_score: 50, // Default priority since MV is empty
+                goals: goal,
+              })) || [],
+            error: null,
+          };
+          return transformed;
         }),
 
-      // Hot entries with summaries
+      // Hot entries with summaries - query separately to avoid join issues
       supabaseClient
         .from("entry_summaries")
-        .select(
-          `
-          entry_id,
-          summary,
-          emotion,
-          urgency_level,
-          entries!inner(id, type, content, metadata, created_at)
-        `
-        )
+        .select("entry_id, summary, emotion, urgency_level")
         .eq("user_id", user.id)
         .order("urgency_level", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(6)
-        .then((result) => {
+        .then(async (result) => {
           if (result.error) {
             console.warn(
               "[get_operating_picture] Entries query error:",
@@ -150,6 +140,27 @@ Deno.serve(async (req) => {
             );
             return { data: [], error: result.error };
           }
+
+          // Fetch entry details separately
+          if (result.data && result.data.length > 0) {
+            const entryIds = result.data.map((s) => s.entry_id);
+            const { data: entries } = await supabaseClient
+              .from("entries")
+              .select("id, type, content, metadata, created_at")
+              .in("id", entryIds);
+
+            // Merge the data
+            const merged = result.data.map((summary) => {
+              const entry = entries?.find((e) => e.id === summary.entry_id);
+              return {
+                ...summary,
+                entries: entry || null,
+              };
+            });
+
+            return { data: merged, error: null };
+          }
+
           return result;
         }),
 

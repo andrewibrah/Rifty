@@ -473,7 +473,10 @@ export const Memory = {
     uid: string | null,
     intent: RoutedIntent,
     query: string,
-    options: { limit?: number } = {}
+    options: { 
+      limit?: number;
+      cachedOperatingPicture?: OperatingPicture | null;
+    } = {}
   ): Promise<{
     operatingPicture: OperatingPicture;
     rag: RagResult[];
@@ -486,10 +489,12 @@ export const Memory = {
     }
 
     const limit = Math.max(3, Math.min(options.limit ?? REMOTE_BRIEF_LIMIT, REMOTE_BRIEF_LIMIT));
-    const [operatingPicture, ragResults] = await Promise.all([
-      getOperatingPicture(userId),
-      ragSearch(userId, query, inferScopeFromIntent(intent), { limit }),
-    ]);
+    
+    // Get operating picture from cache if available (passed via options)
+    // Otherwise fall back to fetching (but this should be avoided)
+    const operatingPicture = options.cachedOperatingPicture ?? await getOperatingPicture(userId);
+    
+    const ragResults = await ragSearch(userId, query, inferScopeFromIntent(intent), { limit });
 
     const memoryRecords: MemoryRecord[] = [];
     const nowTs = Date.now();

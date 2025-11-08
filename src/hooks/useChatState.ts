@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useOperatingPicture } from "../contexts/OperatingPictureContext";
 import { InteractionManager } from "react-native";
 import type {
   ChatMessage,
@@ -344,6 +345,9 @@ export const useChatState = (
     goalData: any;
   } | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
+  // Get cached operating picture
+  const { operatingPicture } = useOperatingPicture();
 
   const loadMessages = useCallback(async () => {
     try {
@@ -744,6 +748,7 @@ export const useChatState = (
             userText: trimmedContent,
             intent: intentPayload,
             planner,
+            cachedOperatingPicture: operatingPicture,
             onToken: (chunk) => {
               streamingReply += chunk;
               setMessages((prevMessages) =>

@@ -89,22 +89,6 @@ export interface AnalystQueryResult {
  * Get operating picture - multi-table memory aggregation
  */
 export async function getOperatingPicture(): Promise<OperatingPictureResult> {
-  // TEMPORARY: Use diagnostic function to identify the issue
-  const { data: testData, error: testError } = await supabase.functions.invoke(
-    "test_operating_picture",
-    {
-      method: "POST",
-      body: {},
-    }
-  );
-
-  console.log("=== DIAGNOSTIC TEST ===");
-  if (testError) {
-    console.error("Test error:", testError);
-  }
-  console.log("Test results:", JSON.stringify(testData, null, 2));
-  console.log("======================");
-
   const { data, error } =
     await supabase.functions.invoke<OperatingPictureResult>(
       "get_operating_picture",
@@ -116,17 +100,14 @@ export async function getOperatingPicture(): Promise<OperatingPictureResult> {
 
   if (error) {
     console.error("[getOperatingPicture] Error:", error);
-    console.error("[getOperatingPicture] Error message:", error.message);
-    console.error("[getOperatingPicture] Error context:", error.context);
-    // The actual error response from server is in data even when there's an error
-    console.error(
-      "[getOperatingPicture] Server error response:",
-      JSON.stringify(data, null, 2)
-    );
     throw error;
   }
 
-  return data!;
+  if (!data) {
+    throw new Error("get_operating_picture returned no data");
+  }
+
+  return data;
 }
 
 /**

@@ -55,6 +55,7 @@ import { supabase } from "./src/lib/supabase";
 import purgeLocal from "./src/utils/purgeLocal";
 import Constants from "expo-constants";
 import { ThemeProvider } from "./src/contexts/ThemeContext";
+import { OperatingPictureProvider } from "./src/contexts/OperatingPictureContext";
 import { usePersonalization } from "./src/hooks/usePersonalization";
 import type {
   PersonalizationBundle,
@@ -1496,7 +1497,9 @@ const App: React.FC = () => {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <AuthenticatedApp session={session} />
+          <OperatingPictureProvider>
+            <AuthenticatedApp session={session} />
+          </OperatingPictureProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
