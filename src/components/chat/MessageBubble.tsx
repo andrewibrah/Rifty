@@ -1,82 +1,14 @@
-import React, { memo, useMemo, useState, useEffect, useRef } from "react";
+import React, { memo, useMemo } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  Animated,
 } from "react-native";
 import { TypeAnimation } from "react-native-type-animation";
 import type { ChatMessage } from "../../types/chat";
 import { getColors, radii, spacing, typography, shadows } from "../../theme";
 import { useTheme } from "../../contexts/ThemeContext";
-
-/**
- * Loading Dots Component
- * Animated dots that indicate the bot is thinking
- */
-const LoadingDots = ({ style }: { style: any }) => {
-  const [dot1] = useState(new Animated.Value(0));
-  const [dot2] = useState(new Animated.Value(0));
-  const [dot3] = useState(new Animated.Value(0));
-
-  useEffect(() => {
-    const createAnimation = (dot: Animated.Value, delay: number) => {
-      return Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(dot, {
-            toValue: 1,
-            duration: 400,
-            useNativeDriver: true,
-          }),
-          Animated.timing(dot, {
-            toValue: 0,
-            duration: 400,
-            useNativeDriver: true,
-          }),
-        ])
-      );
-    };
-
-    const anim1 = createAnimation(dot1, 0);
-    const anim2 = createAnimation(dot2, 150);
-    const anim3 = createAnimation(dot3, 300);
-
-    anim1.start();
-    anim2.start();
-    anim3.start();
-
-    return () => {
-      anim1.stop();
-      anim2.stop();
-      anim3.stop();
-    };
-  }, [dot1, dot2, dot3]);
-
-  const getDotStyle = (animValue: Animated.Value) => ({
-    opacity: animValue.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0.3, 1],
-    }),
-    transform: [
-      {
-        translateY: animValue.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0, -4],
-        }),
-      },
-    ],
-  });
-
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-      <Animated.Text style={[style, getDotStyle(dot1)]}>●</Animated.Text>
-      <Animated.Text style={[style, getDotStyle(dot2)]}>●</Animated.Text>
-      <Animated.Text style={[style, getDotStyle(dot3)]}>●</Animated.Text>
-    </View>
-  );
-};
 
 /**
  * Typewriter Text Component using react-native-type-animation
@@ -318,10 +250,6 @@ const createStyles = (colors: any) =>
     },
     userContent: {
       color: colors.textPrimary,
-    },
-    loadingDots: {
-      fontSize: 10,
-      paddingVertical: spacing.xs,
     },
     intentContainer: {
       flexDirection: "row",
