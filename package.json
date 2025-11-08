@@ -41,6 +41,7 @@
     "react-native": "0.81.5",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-safe-area-context": "5.6.1",
+    "react-native-type-animation": "^0.4.4",
     "react-native-url-polyfill": "^3.0.0",
     "react-native-web": "^0.21.0",
     "zod": "^3.23.8"

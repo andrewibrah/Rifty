@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Animated,
 } from "react-native";
+import { TypeAnimation } from "react-native-type-animation";
 import type { ChatMessage } from "../../types/chat";
 import { getColors, radii, spacing, typography, shadows } from "../../theme";
 import { useTheme } from "../../contexts/ThemeContext";
@@ -78,68 +79,26 @@ const LoadingDots = ({ style }: { style: any }) => {
 };
 
 /**
- * Typewriter Text Component
- * Displays text character by character for a typing effect
- * For new messages: animates as text arrives
- * For old messages: displays instantly
+ * Typewriter Text Component using react-native-type-animation
+ * Displays text with typewriter effect for bot messages
  */
-const TypewriterText = ({
-  text,
-  style,
-  speed = 20, // ms per character
-  isOldMessage = false, // True for already-sent messages (no animation)
-}: {
-  text: string;
-  style: any;
-  speed?: number;
-  isOldMessage?: boolean;
-}) => {
-  const [displayedText, setDisplayedText] = useState(isOldMessage ? text : "");
-  const targetLength = useRef(0);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+const TypewriterText = ({ text, style }: { text: string; style: any }) => {
+  // Flatten the style array to extract the color
+  const flattenedStyle = StyleSheet.flatten(style);
 
-  useEffect(() => {
-    // Old messages: show instantly, no animation
-    if (isOldMessage) {
-      setDisplayedText(text);
-      return;
-    }
+  if (!text) {
+    return <Text style={style}>{text}</Text>;
+  }
 
-    // Update target length when new text arrives
-    targetLength.current = text.length;
-
-    // If no interval running and we have text to display, start animating
-    if (!intervalRef.current && text.length > displayedText.length) {
-      intervalRef.current = setInterval(() => {
-        setDisplayedText((current) => {
-          const currentLength = current.length;
-          const target = targetLength.current;
-
-          // If we've caught up to the target, clear interval
-          if (currentLength >= target) {
-            if (intervalRef.current) {
-              clearInterval(intervalRef.current);
-              intervalRef.current = null;
-            }
-            return current;
-          }
-
-          // Add one more character
-          return text.slice(0, currentLength + 1);
-        });
-      }, speed);
-    }
-
-    // Cleanup
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
-  }, [text, speed, isOldMessage, displayedText.length]);
-
-  return <Text style={style}>{displayedText}</Text>;
+  return (
+    <TypeAnimation
+      sequence={[{ text }]}
+      loop={false}
+      typeSpeed={25}
+      cursor={false}
+      style={flattenedStyle}
+    />
+  );
 };
 
 interface MessageBubbleProps {
@@ -237,8 +196,6 @@ const MessageBubble = memo(
                   <TypewriterText
                     text={message.content}
                     style={[styles.content, styles.botContent]}
-                    speed={15}
-                    isOldMessage={message.status === "sent"}
                   />
                 ) : (
                   <Text style={[styles.content, styles.userContent]}>
