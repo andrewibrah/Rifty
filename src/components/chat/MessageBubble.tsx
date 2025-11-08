@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useState, useEffect } from "react";
+import React, { memo, useMemo, useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -80,54 +80,66 @@ const LoadingDots = ({ style }: { style: any }) => {
 /**
  * Typewriter Text Component
  * Displays text character by character for a typing effect
- * Shows streaming text immediately when message is being sent
+ * For new messages: animates as text arrives
+ * For old messages: displays instantly
  */
 const TypewriterText = ({
   text,
   style,
-  speed = 15, // ms per character
-  isStreaming = false, // True when actively receiving tokens
+  speed = 20, // ms per character
+  isOldMessage = false, // True for already-sent messages (no animation)
 }: {
   text: string;
   style: any;
   speed?: number;
-  isStreaming?: boolean;
+  isOldMessage?: boolean;
 }) => {
-  const [displayedText, setDisplayedText] = useState("");
-  const [targetText, setTargetText] = useState("");
-  const previousLength = React.useRef(0);
+  const [displayedText, setDisplayedText] = useState(isOldMessage ? text : "");
+  const targetLength = useRef(0);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    // If streaming, show text immediately as it arrives (no typewriter during stream)
-    if (isStreaming) {
+    // Old messages: show instantly, no animation
+    if (isOldMessage) {
       setDisplayedText(text);
-      setTargetText(text);
-      previousLength.current = text.length;
       return;
     }
 
-    // If not streaming and text just arrived (changed from empty or stopped growing),
-    // animate from current position to full text
-    if (!isStreaming && text && text !== targetText) {
-      setTargetText(text);
+    // Update target length when new text arrives
+    targetLength.current = text.length;
 
-      // Start from where we left off
-      let currentIndex = displayedText.length;
+    // If no interval running and we have text to display, start animating
+    if (!intervalRef.current && text.length > displayedText.length) {
+      intervalRef.current = setInterval(() => {
+        setDisplayedText((current) => {
+          const currentLength = current.length;
+          const target = targetLength.current;
 
-      const interval = setInterval(() => {
-        if (currentIndex < text.length) {
-          setDisplayedText(text.slice(0, currentIndex + 1));
-          currentIndex++;
-        } else {
-          clearInterval(interval);
-        }
+          // If we've caught up to the target, clear interval
+          if (currentLength >= target) {
+            if (intervalRef.current) {
+              clearInterval(intervalRef.current);
+              intervalRef.current = null;
+            }
+            return current;
+          }
+
+          // Add one more character
+          return text.slice(0, currentLength + 1);
+        });
       }, speed);
-
-      return () => clearInterval(interval);
     }
-  }, [text, speed, isStreaming, targetText, displayedText.length]);
 
-  return <Text style={style}>{displayedText || text}</Text>;
+    // Cleanup
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [text, speed, isOldMessage, displayedText.length]);
+
+  return <Text style={style}>{displayedText}</Text>;
 };
 
 interface MessageBubbleProps {
@@ -222,22 +234,12 @@ const MessageBubble = memo(
                   </View>
                 )}
                 {isBot ? (
-                  message.status === "sending" && !message.content ? (
-                    <LoadingDots
-                      style={[
-                        styles.content,
-                        styles.botContent,
-                        styles.loadingDots,
-                      ]}
-                    />
-                  ) : (
-                    <TypewriterText
-                      text={message.content}
-                      style={[styles.content, styles.botContent]}
-                      speed={15}
-                      isStreaming={message.status === "sending"}
-                    />
-                  )
+                  <TypewriterText
+                    text={message.content}
+                    style={[styles.content, styles.botContent]}
+                    speed={15}
+                    isOldMessage={message.status === "sent"}
+                  />
                 ) : (
                   <Text style={[styles.content, styles.userContent]}>
                     {message.content}
