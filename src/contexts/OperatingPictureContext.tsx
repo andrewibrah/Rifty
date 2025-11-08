@@ -1,13 +1,20 @@
 /**
  * Operating Picture Context
- * 
+ *
  * Caches the operating picture and refreshes it periodically
  * to avoid expensive queries on every message send.
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { getOperatingPicture as fetchOperatingPicture } from '../services/memory';
-import type { OperatingPicture } from '../types/memory';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+} from "react";
+import { getOperatingPicture as fetchOperatingPicture } from "../services/memory";
+import type { OperatingPicture } from "../types/memory";
 
 interface OperatingPictureContextType {
   operatingPicture: OperatingPicture | null;
@@ -17,7 +24,9 @@ interface OperatingPictureContextType {
   lastUpdated: Date | null;
 }
 
-const OperatingPictureContext = createContext<OperatingPictureContextType | undefined>(undefined);
+const OperatingPictureContext = createContext<
+  OperatingPictureContextType | undefined
+>(undefined);
 
 const REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
 const STALE_THRESHOLD = 15 * 60 * 1000; // 15 minutes
@@ -28,12 +37,13 @@ interface Props {
   refreshInterval?: number;
 }
 
-export function OperatingPictureProvider({ 
-  children, 
+export function OperatingPictureProvider({
+  children,
   autoRefresh = true,
-  refreshInterval = REFRESH_INTERVAL 
+  refreshInterval = REFRESH_INTERVAL,
 }: Props) {
-  const [operatingPicture, setOperatingPicture] = useState<OperatingPicture | null>(null);
+  const [operatingPicture, setOperatingPicture] =
+    useState<OperatingPicture | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -44,13 +54,28 @@ export function OperatingPictureProvider({
       setIsLoading(true);
       setError(null);
       const picture = await fetchOperatingPicture();
-      setOperatingPicture(picture);
-      setLastUpdated(new Date());
-      console.log('[OperatingPicture] Refreshed successfully');
+
+      if (picture) {
+        setOperatingPicture(picture);
+        setLastUpdated(new Date());
+        console.log("[OperatingPicture] Refreshed successfully");
+      } else {
+        console.warn(
+          "[OperatingPicture] No data available yet (empty database)"
+        );
+        // Keep existing picture or stay null
+      }
     } catch (err) {
-      const error = err instanceof Error ? err : new Error('Failed to fetch operating picture');
+      const error =
+        err instanceof Error
+          ? err
+          : new Error("Failed to fetch operating picture");
       setError(error);
-      console.error('[OperatingPicture] Refresh failed:', error);
+      console.warn(
+        "[OperatingPicture] Refresh failed (will retry):",
+        error.message
+      );
+      // Don't crash - keep using stale data if available, or null if first load
     } finally {
       setIsLoading(false);
     }
@@ -66,7 +91,7 @@ export function OperatingPictureProvider({
     if (!autoRefresh) return;
 
     refreshTimerRef.current = setInterval(() => {
-      console.log('[OperatingPicture] Auto-refresh triggered');
+      console.log("[OperatingPicture] Auto-refresh triggered");
       refresh();
     }, refreshInterval);
 
@@ -95,7 +120,9 @@ export function OperatingPictureProvider({
 export function useOperatingPicture(): OperatingPictureContextType {
   const context = useContext(OperatingPictureContext);
   if (context === undefined) {
-    throw new Error('useOperatingPicture must be used within OperatingPictureProvider');
+    throw new Error(
+      "useOperatingPicture must be used within OperatingPictureProvider"
+    );
   }
   return context;
 }
@@ -110,7 +137,7 @@ export function useCachedOperatingPicture(): {
 } {
   const { operatingPicture, lastUpdated, refresh } = useOperatingPicture();
 
-  const isStale = lastUpdated 
+  const isStale = lastUpdated
     ? Date.now() - lastUpdated.getTime() > STALE_THRESHOLD
     : true;
 
@@ -120,4 +147,3 @@ export function useCachedOperatingPicture(): {
     refresh,
   };
 }
-

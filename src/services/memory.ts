@@ -220,13 +220,17 @@ const mapOperatingSchedules = (rows: unknown[]): OperatingSchedule[] =>
 
 export async function getOperatingPicture(
   uid?: string
-): Promise<OperatingPicture> {
+): Promise<OperatingPicture | null> {
   const userId = await resolveUserId(uid);
   if (!userId) {
     throw new Error("User not authenticated");
   }
 
   const payload = await invokeOperatingPicture();
+
+  if (!payload) {
+    return null;
+  }
   const cadenceRaw = (payload?.cadence_profile ?? {}) as Record<
     string,
     unknown

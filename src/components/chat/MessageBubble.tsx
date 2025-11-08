@@ -1,8 +1,50 @@
-import React, { memo, useMemo } from "react";
+import React, { memo, useMemo, useState, useEffect } from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import type { ChatMessage } from "../../types/chat";
 import { getColors, radii, spacing, typography, shadows } from "../../theme";
 import { useTheme } from "../../contexts/ThemeContext";
+
+/**
+ * Typewriter Text Component
+ * Displays text character by character for a typing effect
+ */
+const TypewriterText = ({
+  text,
+  style,
+  speed = 20, // ms per character
+}: {
+  text: string;
+  style: any;
+  speed?: number;
+}) => {
+  const [displayedText, setDisplayedText] = useState("");
+  const [isComplete, setIsComplete] = useState(false);
+
+  useEffect(() => {
+    // Reset on text change
+    setDisplayedText("");
+    setIsComplete(false);
+
+    if (!text) {
+      return;
+    }
+
+    let currentIndex = 0;
+    const interval = setInterval(() => {
+      if (currentIndex < text.length) {
+        setDisplayedText(text.slice(0, currentIndex + 1));
+        currentIndex++;
+      } else {
+        setIsComplete(true);
+        clearInterval(interval);
+      }
+    }, speed);
+
+    return () => clearInterval(interval);
+  }, [text, speed]);
+
+  return <Text style={style}>{displayedText}</Text>;
+};
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -95,14 +137,17 @@ const MessageBubble = memo(
                     </TouchableOpacity>
                   </View>
                 )}
-                <Text
-                  style={[
-                    styles.content,
-                    isBot ? styles.botContent : styles.userContent,
-                  ]}
-                >
-                  {message.content}
-                </Text>
+                {isBot ? (
+                  <TypewriterText
+                    text={message.content}
+                    style={[styles.content, styles.botContent]}
+                    speed={15}
+                  />
+                ) : (
+                  <Text style={[styles.content, styles.userContent]}>
+                    {message.content}
+                  </Text>
+                )}
                 {message.kind === "entry" && message.intentMeta && (
                   <View style={styles.intentContainer}>
                     <Text
@@ -138,7 +183,7 @@ const MessageBubble = memo(
 const createStyles = (colors: any) =>
   StyleSheet.create({
     container: {
-      marginBottom: 10,
+      marginVertical: spacing.sm,
       marginHorizontal: spacing.sm,
       alignItems: "flex-end",
     },
@@ -172,7 +217,7 @@ const createStyles = (colors: any) =>
     },
     bubble: {
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm + 4,
+      paddingVertical: spacing.sm,
       borderRadius: radii.md,
       borderWidth: 1,
     },

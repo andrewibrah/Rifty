@@ -88,7 +88,7 @@ export interface AnalystQueryResult {
 /**
  * Get operating picture - multi-table memory aggregation
  */
-export async function getOperatingPicture(): Promise<OperatingPictureResult> {
+export async function getOperatingPicture(): Promise<OperatingPictureResult | null> {
   const { data, error } =
     await supabase.functions.invoke<OperatingPictureResult>(
       "get_operating_picture",
@@ -99,12 +99,16 @@ export async function getOperatingPicture(): Promise<OperatingPictureResult> {
     );
 
   if (error) {
-    console.error("[getOperatingPicture] Error:", error);
-    throw error;
+    console.warn(
+      "[getOperatingPicture] Edge function failed (may be empty data):",
+      error.message
+    );
+    return null;
   }
 
   if (!data) {
-    throw new Error("get_operating_picture returned no data");
+    console.warn("[getOperatingPicture] No data returned");
+    return null;
   }
 
   return data;
