@@ -29,6 +29,10 @@
 supabase secrets set SERVICE_ROLE_KEY=your_service_role_key_here
 supabase secrets set PROJECT_URL=https://your-project.supabase.co
 supabase secrets set OPENAI_API_KEY=your_openai_key_here
+# JWT alignment
+supabase secrets set AUTH_JWT_ISSUER=https://your-project.supabase.co/auth/v1
+supabase secrets set AUTH_JWT_AUDIENCE=authenticated
+supabase secrets set AUTH_JWT_ALLOWED_CLOCK_SKEW_SECONDS=120
 ```
 
 ### 2. Access Secrets in Edge Functions

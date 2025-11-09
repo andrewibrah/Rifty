@@ -54,6 +54,32 @@ You should see:
 - `OPENAI_API_KEY`
 - `PROJECT_URL` (automatically provided)
 - `SERVICE_ROLE_KEY` (automatically provided)
+- `AUTH_JWT_ISSUER`
+- `AUTH_JWT_AUDIENCE`
+- `AUTH_JWT_ALLOWED_CLOCK_SKEW_SECONDS`
+
+## Auth Alignment Checklist
+
+Edge functions now enforce the same identity expectations as the Expo app. Set the JWT metadata secrets once per environment so auth feels seamless everywhere:
+
+| Secret | Value | Notes |
+| --- | --- | --- |
+| `AUTH_JWT_ISSUER` | `https://ajqcprzxaywgdtsveewq.supabase.co/auth/v1` | Derived from project URL |
+| `AUTH_JWT_AUDIENCE` | `authenticated` | Matches Supabase default and Expo client |
+| `AUTH_JWT_ALLOWED_CLOCK_SKEW_SECONDS` | `120` | Gives ±2 min tolerance for device clocks |
+
+```bash
+supabase secrets set \
+  AUTH_JWT_ISSUER=https://ajqcprzxaywgdtsveewq.supabase.co/auth/v1 \
+  AUTH_JWT_AUDIENCE=authenticated \
+  AUTH_JWT_ALLOWED_CLOCK_SKEW_SECONDS=120
+```
+
+Every function now double-checks issuer, audience, and skew before touching the database. No extra code is required on the client—just keep using the Supabase session token the same way the app already does.
+
+## Tamper-Evident Event Logging
+
+The `events` table is now append-only thanks to database triggers that reject any UPDATE or DELETE. That keeps audit history immutable without adding new moving parts. Deployments automatically apply the guard (`supabase/migrations/20251109093000_events_append_only.sql`), so there’s nothing to configure—just know that every log entry is permanent and will raise if someone tries to change or remove it.
 
 ## Step 3: Deploy Edge Functions
 

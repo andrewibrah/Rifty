@@ -91,3 +91,48 @@ entrypoint = "./functions/create_entry_from_chat/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/persist_user_facts/index.ts"
+
+[functions.list_messages]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/list_messages/index.ts"
+
+[functions.append_message]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/append_message/index.ts"
+
+[functions.fetch_latest_assistant_messages]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/fetch_latest_assistant_messages/index.ts"
+
+[functions.list_journals]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/list_journals/index.ts"
+
+[functions.create_journal_entry]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/create_journal_entry/index.ts"
+
+[functions.update_journal_entry]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/update_journal_entry/index.ts"
+
+[functions.delete_journal_entry]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/delete_journal_entry/index.ts"
+
+[functions.log_intent_audit]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/log_intent_audit/index.ts"
+
+[functions.get_journal_entry_by_id]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/get_journal_entry_by_id/index.ts"

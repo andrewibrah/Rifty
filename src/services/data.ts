@@ -1,5 +1,4 @@
 import { supabase } from "../lib/supabase";
-import { isUUID } from "../utils/uuid";
 
 type Nullable<T> = T | null;
 
@@ -13,6 +12,7 @@ export type RemoteMessage = {
   content: string;
   metadata: Nullable<Record<string, any>>;
   created_at: string;
+  updated_at?: string;
 };
 
 export type EntryType = "journal" | "goal" | "schedule";
@@ -34,36 +34,73 @@ export type RemoteJournalEntry = {
   linked_moments?: string[];
 };
 
+const EDGE_FUNCTIONS = {
+  listMessages: "list_messages",
+  appendMessage: "append_message",
+  fetchLatestAssistantMessages: "fetch_latest_assistant_messages",
+  listJournals: "list_journals",
+  createJournalEntry: "create_journal_entry",
+  updateJournalEntry: "update_journal_entry",
+  deleteJournalEntry: "delete_journal_entry",
+  logIntentAudit: "log_intent_audit",
+  getJournalEntryById: "get_journal_entry_by_id",
+} as const;
+
+type EdgeFunctionName =
+  (typeof EDGE_FUNCTIONS)[keyof typeof EDGE_FUNCTIONS];
+
+interface InvokeEdgeFunctionOptions {
+  allowNull?: boolean;
+}
+
+async function invokeEdgeFunction<T>(
+  functionName: EdgeFunctionName,
+  body: Record<string, unknown>,
+  options: InvokeEdgeFunctionOptions = {}
+): Promise<T> {
+  const { allowNull = false } = options;
+  const { data, error } = await supabase.functions.invoke<T>(
+    functionName,
+    {
+      method: "POST",
+      body,
+    }
+  );
+
+  if (error) {
+    console.error(`[${functionName}] Edge function error:`, error);
+    throw error;
+  }
+
+  if ((data === null || data === undefined) && !allowNull) {
+    throw new Error(`${functionName} edge function returned no data`);
+  }
+
+  return data as T;
+}
+
 export async function listMessages(
   conversationId: string,
   options: { limit?: number; before?: string } = {}
 ): Promise<RemoteMessage[]> {
-  const user = await requireUser();
-  const limit = options.limit ?? 100;
+  const payload: Record<string, unknown> = {
+    conversation_id: conversationId,
+  };
 
-  let query = supabase
-    .from("messages")
-    .select("*")
-    .eq("user_id", user.id)
-    .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  if (options.limit !== undefined) {
+    payload.limit = options.limit;
+  }
 
   if (options.before) {
-    query = query.lt("created_at", options.before);
+    payload.before = options.before;
   }
 
-  const { data, error } = await query;
-
-  if (error) {
-    throw error;
-  }
-
-  const items = (data ?? []) as RemoteMessage[];
-  return items.sort(
-    (a, b) =>
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  const messages = await invokeEdgeFunction<RemoteMessage[]>(
+    EDGE_FUNCTIONS.listMessages,
+    payload
   );
+
+  return messages ?? [];
 }
 
 export async function appendMessage(
@@ -72,27 +109,15 @@ export async function appendMessage(
   content: string,
   metadata?: Record<string, any>
 ): Promise<RemoteMessage> {
-  const user = await requireUser();
-
-  const payload = {
-    conversation_id: conversationId,
-    user_id: user.id,
-    role,
-    content,
-    metadata: metadata ?? null,
-  };
-
-  const { data, error } = await supabase
-    .from("messages")
-    .insert(payload)
-    .select()
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  return data as RemoteMessage;
+  return invokeEdgeFunction<RemoteMessage>(
+    EDGE_FUNCTIONS.appendMessage,
+    {
+      conversation_id: conversationId,
+      role,
+      content,
+      metadata: metadata ?? null,
+    }
+  );
 }
 
 export async function fetchLatestAssistantMessages(
@@ -102,65 +127,38 @@ export async function fetchLatestAssistantMessages(
     return {};
   }
 
-  const user = await requireUser();
+  const assistantMap =
+    await invokeEdgeFunction<Record<string, RemoteMessage | null>>(
+      EDGE_FUNCTIONS.fetchLatestAssistantMessages,
+      { conversation_ids: conversationIds }
+    );
 
-  const { data, error } = await supabase
-    .from("messages")
-    .select("*")
-    .eq("user_id", user.id)
-    .in("conversation_id", conversationIds)
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    throw error;
-  }
-
-  const assistantMap: Record<string, RemoteMessage | null> = {};
-  const rows = (data ?? []) as RemoteMessage[];
-
-  for (const message of rows) {
-    if (message.role !== "assistant") continue;
-    if (assistantMap[message.conversation_id]) continue;
-    assistantMap[message.conversation_id] = message;
-  }
-
-  conversationIds.forEach((id) => {
-    if (!(id in assistantMap)) {
-      assistantMap[id] = null;
-    }
-  });
-
-  return assistantMap;
+  return assistantMap ?? {};
 }
 
 export async function listJournals(
   options: { limit?: number; before?: string; type?: EntryType } = {}
 ): Promise<RemoteJournalEntry[]> {
-  const user = await requireUser();
-  const limit = options.limit ?? 50;
+  const payload: Record<string, unknown> = {};
 
-  let query = supabase
-    .from("entries")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  if (options.limit !== undefined) {
+    payload.limit = options.limit;
+  }
 
   if (options.before) {
-    query = query.lt("created_at", options.before);
+    payload.before = options.before;
   }
 
   if (options.type) {
-    query = query.eq("type", options.type);
+    payload.type = options.type;
   }
 
-  const { data, error } = await query;
+  const entries = await invokeEdgeFunction<RemoteJournalEntry[]>(
+    EDGE_FUNCTIONS.listJournals,
+    payload
+  );
 
-  if (error) {
-    throw error;
-  }
-
-  return (data ?? []) as RemoteJournalEntry[];
+  return entries ?? [];
 }
 
 export async function createJournalEntry(params: {
@@ -170,26 +168,16 @@ export async function createJournalEntry(params: {
   mood?: string | null;
   feeling_tags?: string[];
 }): Promise<RemoteJournalEntry> {
-  const user = await requireUser();
-
-  const { data, error } = await supabase
-    .from("entries")
-    .insert({
-      user_id: user.id,
+  return invokeEdgeFunction<RemoteJournalEntry>(
+    EDGE_FUNCTIONS.createJournalEntry,
+    {
       type: params.type,
       content: params.content,
       metadata: params.metadata ?? null,
       mood: params.mood ?? null,
       feeling_tags: params.feeling_tags ?? [],
-    })
-    .select()
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  return data as RemoteJournalEntry;
+    }
+  );
 }
 
 export async function updateJournalEntry(
@@ -202,52 +190,21 @@ export async function updateJournalEntry(
     linked_moments?: string[];
   }
 ): Promise<RemoteJournalEntry> {
-  const user = await requireUser();
-
-  if (!isUUID(entryId)) {
-    throw new Error("Invalid entry id");
-  }
-
-  const payload: Record<string, any> = {};
-  if (updates.content !== undefined) payload.content = updates.content;
-  if (updates.metadata !== undefined) payload.metadata = updates.metadata;
-  if (updates.mood !== undefined) payload.mood = updates.mood;
-  if (updates.feeling_tags !== undefined)
-    payload.feeling_tags = updates.feeling_tags;
-  if (updates.linked_moments !== undefined)
-    payload.linked_moments = updates.linked_moments;
-
-  const { data, error } = await supabase
-    .from("entries")
-    .update(payload)
-    .eq("id", entryId)
-    .eq("user_id", user.id)
-    .select()
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  return data as RemoteJournalEntry;
+  return invokeEdgeFunction<RemoteJournalEntry>(
+    EDGE_FUNCTIONS.updateJournalEntry,
+    {
+      entry_id: entryId,
+      ...updates,
+    }
+  );
 }
 
 export async function deleteJournalEntry(id: string): Promise<void> {
-  const user = await requireUser();
-
-  if (!isUUID(id)) {
-    throw new Error("Invalid entry id");
-  }
-
-  const { error } = await supabase
-    .from("entries")
-    .delete()
-    .eq("id", id)
-    .eq("user_id", user.id);
-
-  if (error) {
-    throw error;
-  }
+  await invokeEdgeFunction(
+    EDGE_FUNCTIONS.deleteJournalEntry,
+    { entry_id: id },
+    { allowNull: true }
+  );
 }
 
 interface DeleteAllEntriesResponse {
@@ -315,65 +272,26 @@ export async function logIntentAudit(params: {
   predictedIntent: string;
   correctIntent: string;
 }): Promise<void> {
-  const user = await requireUser();
-
-  if (!isUUID(params.entryId)) {
-    throw new Error("[logIntentAudit] Invalid entryId: must be a UUID");
-  }
-
-  const { error } = await supabase.from("intent_audits").insert({
-    user_id: user.id,
-    entry_id: params.entryId,
-    prompt: params.prompt,
-    predicted_intent: params.predictedIntent,
-    correct_intent: params.correctIntent,
-  });
-
-  if (error) {
-    throw error;
-  }
+  await invokeEdgeFunction(
+    EDGE_FUNCTIONS.logIntentAudit,
+    {
+      entry_id: params.entryId,
+      prompt: params.prompt,
+      predicted_intent: params.predictedIntent,
+      correct_intent: params.correctIntent,
+    },
+    { allowNull: true }
+  );
 }
 
 export async function getJournalEntryById(
   id: string
 ): Promise<RemoteJournalEntry | null> {
-  const user = await requireUser();
+  const entry = await invokeEdgeFunction<RemoteJournalEntry | null>(
+    EDGE_FUNCTIONS.getJournalEntryById,
+    { entry_id: id },
+    { allowNull: true }
+  );
 
-  if (!isUUID(id)) {
-    console.warn(
-      "[getJournalEntryById] Skipping lookup for invalid entry id",
-      id
-    );
-    return null;
-  }
-
-  const { data, error } = await supabase
-    .from("entries")
-    .select("*")
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (error) {
-    throw error;
-  }
-
-  return (data as RemoteJournalEntry | null) ?? null;
-}
-
-async function requireUser() {
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error) {
-    throw error;
-  }
-
-  if (!user) {
-    throw new Error("User is not authenticated");
-  }
-
-  return user;
+  return entry ?? null;
 }
