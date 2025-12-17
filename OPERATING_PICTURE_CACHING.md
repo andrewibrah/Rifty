@@ -32,22 +32,22 @@ Implemented a **React Context-based caching system** that:
 
 ### Modified Files
 
-#### `/App.tsx`
+#### `/apps/mobile/App.tsx`
 - Wrapped `<AuthenticatedApp>` with `<OperatingPictureProvider>`
 - Operating picture loads immediately after authentication
 - Available throughout the entire app
 
-#### `/src/hooks/useChatState.ts`
+#### `/apps/mobile/src/hooks/useChatState.ts`
 - Added `useOperatingPicture()` hook
 - Passes `operatingPicture` to `generateMainChatReply()`
 - No longer fetches on every message
 
-#### `/src/services/mainChat.ts`
+#### `/apps/mobile/src/services/mainChat.ts`
 - Updated `GenerateArgs` type to accept `cachedOperatingPicture`
 - Updated `buildBrief()` to accept `cachedOperatingPicture` parameter
 - Passes cached version to `Memory.getBrief()`
 
-#### `/src/agent/memory.ts`
+#### `/apps/mobile/src/agent/memory.ts`
 - Updated `getBrief()` options to accept `cachedOperatingPicture`
 - Uses cached version if available
 - Falls back to fetching only if not provided (logged as warning)
@@ -154,4 +154,3 @@ The context logs refresh events:
 2. Check caching: Send multiple messages, only first should log "getBrief"
 3. Check refresh: Wait 10 minutes, should see auto-refresh log
 4. Check staleness: `useCachedOperatingPicture()` should report stale after 15min
-

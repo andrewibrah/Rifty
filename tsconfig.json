@@ -8,19 +8,25 @@
     "baseUrl": ".",
     "paths": {
       "@/*": [
-        "src/*"
+        "apps/mobile/src/*"
+      ],
+      "@shared/*": [
+        "packages/shared/src/*"
       ],
       "react-native-safe-area-context": [
-        "vendor/react-native-safe-area-context"
+        "apps/mobile/vendor/react-native-safe-area-context"
       ]
     },
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true
   },
+  "include": [
+    "apps/mobile/**/*",
+    "packages/shared/**/*"
+  ],
   "exclude": [
     "supabase/functions",
-    "scripts",
-    "tests"
+    "node_modules"
   ]
 }

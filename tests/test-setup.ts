@@ -4,6 +4,8 @@ type SupabaseResult<T = any> = Promise<{ data: T; error: any }>;
 
 const noopResult: SupabaseResult = Promise.resolve({ data: null, error: null });
 
+(globalThis as any).__DEV__ = false;
+
 const createQueryBuilder = () => {
   const builder: any = {
     select: () => builder,
@@ -22,6 +24,20 @@ const createQueryBuilder = () => {
   };
   return builder;
 };
+
+vi.mock('expo-constants', () => ({
+  __esModule: true,
+  default: {
+    expoConfig: { extra: {} },
+    manifest2: { extra: {} },
+  },
+}));
+
+vi.mock('expo-crypto', () => ({
+  __esModule: true,
+  randomUUID: () => '00000000-0000-0000-0000-000000000000',
+  getRandomBytes: (length: number) => new Uint8Array(length).fill(1),
+}));
 
 vi.mock('@react-native-async-storage/async-storage', () => {
   const store = new Map<string, string>();

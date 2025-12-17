@@ -11,6 +11,8 @@ const ignores = [
   "supabase/functions/**",
   "supabase/.temp/**",
   "vendor/**",
+  "apps/mobile/vendor/**",
+  "apps/mobile/services/ai/**",
 ];
 
 export default [

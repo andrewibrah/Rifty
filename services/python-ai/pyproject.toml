@@ -1,0 +1,21 @@
+[project]
+name = "rifty-python-ai"
+version = "0.1.0"
+description = "FastAPI service placeholder for AI orchestration."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "pydantic",
+  "pytest",
+  "httpx",
+  "jsonschema",
+  "pyyaml",
+  "pytest-asyncio"
+]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+
+[tool.ruff]
+line-length = 100

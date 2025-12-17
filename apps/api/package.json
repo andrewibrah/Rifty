@@ -1,0 +1,12 @@
+{
+  "name": "@rifty/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HTTP gateway placeholder for the mobile app (Fastify/Express to be wired).",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "node ./src/index.ts",
+    "start": "node ./src/index.ts"
+  }
+}

@@ -79,7 +79,7 @@ Every function now double-checks issuer, audience, and skew before touching the 
 
 ## Tamper-Evident Event Logging
 
-The `events` table is now append-only thanks to database triggers that reject any UPDATE or DELETE. That keeps audit history immutable without adding new moving parts. Deployments automatically apply the guard (`supabase/migrations/20251109093000_events_append_only.sql`), so there’s nothing to configure—just know that every log entry is permanent and will raise if someone tries to change or remove it.
+The `events` table is now append-only thanks to database triggers that reject any UPDATE or DELETE. That keeps audit history immutable without adding new moving parts. Deployments automatically apply the guard (`infra/db/supabase/migrations/20251109093000_events_append_only.sql`), so there’s nothing to configure—just know that every log entry is permanent and will raise if someone tries to change or remove it.
 
 ## Step 3: Deploy Edge Functions
 

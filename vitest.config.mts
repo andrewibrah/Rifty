@@ -11,7 +11,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": resolve(moduleDirname, "src"),
+      "@": resolve(moduleDirname, "apps/mobile/src"),
+      "@shared": resolve(moduleDirname, "packages/shared/src"),
       "react-native": resolve(moduleDirname, "tests/mocks/react-native.ts"),
     },
   },

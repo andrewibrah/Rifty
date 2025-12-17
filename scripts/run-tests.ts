@@ -4,12 +4,12 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { isUUID } from '../src/utils/uuid.ts';
+import { isUUID } from '../apps/mobile/src/utils/uuid.ts';
 import {
   CreateGoalInputSchema,
   GoalSchema,
   MicroStepSchema,
-} from '../src/types/goal.ts';
+} from '../packages/shared/src/types/goal.ts';
 
 function log(step: string): void {
   console.log(`\n[codex-check] ${step}`);
@@ -30,7 +30,15 @@ async function main(): Promise<void> {
     assert.ok(!isUUID('1760940686225'), 'Timestamp-like identifiers should fail UUID validation');
 
     log('Verifying theme tokens');
-    const themePath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'theme', 'index.ts');
+    const themePath = path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '..',
+      'apps',
+      'mobile',
+      'src',
+      'theme',
+      'index.ts'
+    );
     const themeSource = await fs.readFile(themePath, 'utf8');
 
     const requiredRadii = ['xs', 'sm', 'md', 'lg', 'xl', 'pill'];
@@ -98,6 +106,8 @@ async function main(): Promise<void> {
     const migrationsDir = path.join(
       path.dirname(fileURLToPath(import.meta.url)),
       '..',
+      'infra',
+      'db',
       'supabase',
       'migrations'
     );
@@ -160,6 +170,8 @@ async function main(): Promise<void> {
     const exportPath = path.join(
       path.dirname(fileURLToPath(import.meta.url)),
       '..',
+      'apps',
+      'mobile',
       'src',
       'services',
       'export.ts'

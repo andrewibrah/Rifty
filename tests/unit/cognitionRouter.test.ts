@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'fs';
-import { CognitionRouter } from '../../services/ai/router';
+import { CognitionRouter } from '../../apps/mobile/services/ai/router';
 
-const PERSONA_FIXTURES = join(process.cwd(), 'services/ai/personas');
+const PERSONA_FIXTURES = join(process.cwd(), 'apps/mobile/services/ai/personas');
 
 describe('CognitionRouter persona loading', () => {
   it('parses bundled personas with array fields', () => {
